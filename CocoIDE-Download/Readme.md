@@ -12,3 +12,5 @@ MAC/OSX: In later versions of OSX, folders that are linked to external (i)cloud 
 If the CocoIDE.pyzw file still does not run correctly, you may find that using the uncompressed source code version will run ok. Simply download all the files from the CocoIDE-Download/Source/ folder and extract the files to a new local folder. If double clicking the cocoide.pyw source file does not work, open the cocoide.pyw file in IDLE (the Python IDE) and Select Run from the Run menu.
 
 
+The test assembly program "helloProg.asm" demostrates a number of features of programming the CDM8 processor with CocoIDE. To see the OP message click on IO +, and add an OP_Disp_16xChr (16 Character memoery mapped Display) at memory location 0xEO. Click "COmpile/Reset" then "Start".
+
