@@ -17,5 +17,5 @@ If the CocoIDE.pyzw file still does not run correctly, you may find that using t
 
 
 Testing:  
-The test assembly program "helloProg.asm" demostrates a number of features of programming the CDM8 processor with CocoIDE. To see the OP message click on IO +, and add an OP_Disp_16xChr (16 Character memoery mapped Display) at memory location 0xEO. Click "COmpile/Reset" then "Start".
+The test assembly program "helloProg.asm" demostrates a number of features of programming the CDM8 processor with CocoIDE. To see the OP message click on IO +, and add an OP_Disp_16xChr (16 Character memory mapped display device) at memory location 0xEO. Click "Compile/Reset" then "Start".
 
