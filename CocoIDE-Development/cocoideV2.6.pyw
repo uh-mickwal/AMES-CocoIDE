@@ -2660,13 +2660,13 @@ class CocoIDE(tk.Frame):
         self.Emu.curPage = 0
         textList = []
         errorMsg = None
-        cocas.errLine = None
+        cocas.err_line = None
         overlapStart = None
         page = 0
 
         self.statusMsg.config(text="")
 
-        # Clear errLine tag from asstxt window
+        # Clear err_line tag from asstxt window
         self.asstxt.tag_delete("err")
         self.mcode_list.delete(1.0, tk.END)
         self.mcode_list.config(wrap=tk.NONE)
@@ -2697,10 +2697,10 @@ class CocoIDE(tk.Frame):
         if archpos:
             self.arch[0] = self.asstxt.get(archpos + "+7c", archpos + "+9c")
             if self.setArch(self.arch[0], page=0) == "Unrecognised Architecture":
-                cocas.errLine = int(float(archpos))
+                cocas.err_line = int(float(archpos))
                 errorMsg = (
                     "Line "
-                    + str(cocas.errLine)
+                    + str(cocas.err_line)
                     + ": Unrecognised Architecture, expected 'hv' or 'vn'"
                 )
 
@@ -2850,10 +2850,10 @@ class CocoIDE(tk.Frame):
                                     if (
                                         overlapStart
                                     ):  # Check for overalapping sections/asects
-                                        cocas.errLine = int(float(overlapStart))
+                                        cocas.err_line = int(float(overlapStart))
                                         errorMsg = (
                                             "On line "
-                                            + str(cocas.errLine)
+                                            + str(cocas.err_line)
                                             + " ERROR: Overlapping asect! Code from this line onward, will overwrite previously compiled code"
                                         )
                                         break
@@ -2914,20 +2914,20 @@ class CocoIDE(tk.Frame):
             # Then highlight line in text editor where error occurs
             if "On line" in errorMsg:
                 # print("error line =", int(errorMsg[0][8:11]))
-                # cocas.errline picks up some error line numbers, but not all!
+                # cocas.err_line picks up some error line numbers, but not all!
                 # So more reliable to check the error message directly
-                if not cocas.errLine:
-                    cocas.errLine = int(errorMsg[8 : errorMsg.find(" ", 8)])
-                # cocas.errline = int(errorMsg[0][8:11])
-                # print(cocas.errLine)# debug
-            if cocas.errLine:  # Highlights error line
-                self.highlightLine(str(cocas.errLine) + ".0")
+                if not cocas.err_line:
+                    cocas.err_line = int(errorMsg[8 : errorMsg.find(" ", 8)])
+                # cocas.err_line = int(errorMsg[0][8:11])
+                # print(cocas.err_line)# debug
+            if cocas.err_line:  # Highlights error line
+                self.highlightLine(str(cocas.err_line) + ".0")
                 # self.asstxt.tag_delete("err")
-                # self.asstxt.tag_add("err", "%s linestart" % (str(cocas.errLine)+".0"), "%s lineend+1c" % (str(cocas.errLine)+".0")) # add tag to k
+                # self.asstxt.tag_add("err", "%s linestart" % (str(cocas.err_line)+".0"), "%s lineend+1c" % (str(cocas.err_line)+".0")) # add tag to k
                 # self.asstxt.tag_config("err", background=cf.errColour)
                 # self.updateLineNos()
                 # self.update()
-                # self.asstxt.see("%s" % str(cocas.errLine)+".0")# scroll to see error line
+                # self.asstxt.see("%s" % str(cocas.err_line)+".0")# scroll to see error line
 
             for n in range(
                 self.Emu.datamem[self.Emu.curPage],
