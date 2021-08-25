@@ -52,9 +52,9 @@ except:
 # Variables and dictionaries
 asmfile = ""
 text = []
-PC = 0
-Rel = False
-rellist = {}
+counter = 0
+rel = False
+rel_list = {}
 exts = {}
 ents = {}
 abses = {}
@@ -64,14 +64,14 @@ macros = {}
 labels["$abs"] = {}
 ents["$abs"] = {}
 tpls = {}
-Tpl = False
-DsIns = False
-tplName = ""
+tpl = False
+ds_ins = False
+tpl_name = ""
 generated = []
 args = None
-gotminus = False
-errorMsg = ""
-SectName = None
+got_minus = False
+error_msg = ""
+sect_name = None
 """
 global SectName=None
 global mname
@@ -84,9 +84,9 @@ global pars
 
 
 # Used by CocoIDE when imported
-retError = False
-errorMsg = ""
-errLine = None
+ret_error = False
+error_msg = ""
+err_line = None
 # Instruction set
 
 bi = 2  # binary arithmetic/logic & ld/st ops
@@ -329,15 +329,15 @@ class CocAs(tk.Tk):
 
 class LE(Exception):
     def __init__(self, i, m):
-        global errLine
-        # errLine = i
+        global err_line
+        # err_line = i
         # print("LE",i,m)#debug
-        global retError, errorMsg
+        global ret_error, error_msg
         # print("**", retError)
         # if retError:
         #    errorMsg = "LINE "+ str(i) +": "+m
         # else:
-        errorMsg = m
+        error_msg = m
         # errorMsg += "\n"+m
         self.ind = i
         self.msg = m
@@ -345,20 +345,20 @@ class LE(Exception):
 
 class SE(Exception):
     def __init__(self, i, m):
-        global retError, errorMsg
+        global ret_error, error_msg
         # print("SE",i,m)#debug
         # if retError:
         #    errorMsg = "LINE "+ str(i) +": "+m
         # else:
         if not macdef:
-            errorMsg = m
+            error_msg = m
         # errorMsg += "\n"+m
         self.ind = i
         self.msg = m
 
 
 def lex(s):
-    global gotminus
+    global got_minus
 
     def hexbyte(s):
         w = s
@@ -427,7 +427,7 @@ def lex(s):
             return (CAT, i + 2, int(s[i + 1]))
     elif CAT == "num":
         if ln - 1 >= i + 1 and s[i : i + 2] == "0x":
-            if gotminus:
+            if got_minus:
                 raise LE(i, "Signed hexadecimal not allowed")
             if ln - 1 < i + 3:
                 raise LE(i, "Illegal hexadecimal")
@@ -440,7 +440,7 @@ def lex(s):
                 return [CAT, -1, k]
 
         if ln - 1 >= i + 1 and s[i : i + 2] == "0b":
-            if gotminus:
+            if got_minus:
                 raise LE(i, "Signed binary not allowed")
             if ln - 1 < i + 9:
                 raise LE(i, "Illegal binary")
@@ -455,7 +455,7 @@ def lex(s):
                 return [CAT, -1, k]
 
         k = 0
-        gotminus = False
+        got_minus = False
         while x.isdigit():
             k = 10 * k + int(x)
             if i == ln - 1:
@@ -497,15 +497,15 @@ def lex(s):
         else:
             i = i + 1
         if CAT == "-":
-            gotminus = True
+            got_minus = True
         else:
-            gotminus = False
+            got_minus = False
         return [CAT, i, 0]
 
 
 def lexline(linum, s):
-    global gotminus, errLine
-    gotminus = False
+    global got_minus, err_line
+    got_minus = False
     s0 = s
     r = []
     ind = 0
@@ -518,7 +518,7 @@ def lexline(linum, s):
             [cat, ind, val] = lex(s)
             # print("**", cat)# debug
         except LE as e:
-            errLine = linum  # Picked up by cocoide
+            err_line = linum  # Picked up by cocoide
             EP(
                 "On line "
                 + str(linum)
@@ -529,7 +529,7 @@ def lexline(linum, s):
                 + e.msg
             )
         # if not cat or not ind or not val:
-        #    errLine = linum # Picked up by cocoide
+        #    err_line = linum # Picked up by cocoide
         #    EP( "On line "+str(linum)+ "ERROR: Bad OP Code" )
         if (cat == "emp" and len(r) == 0) or cat != "emp":
             r = r + [(cat, val, ptr)]
@@ -540,44 +540,45 @@ def lexline(linum, s):
 
 
 def asmline(s, linum, passno):
-    global SectName
-    global rellist
+    global sect_name
+    global rel_list
     global exts
     global ents
     global abses
     global labels
     global rsects
-    global PC
-    global Rel
+    global counter
+    global rel
     global mname
     global mcalls
     global marity
     global mcount
     global macdef
     global pars
-    global DsIns
+    global ds_ins
     global tpls
-    global Tpl
-    global tplName
-    global errorMsg
+    global tpl
+    global tpl_name
+    global error_msg
+    global err_line
 
     def parse_exp(lst, onlyabs=False):
         gotrel = False
-        relcontext = SectName != "$abs"
+        relcontext = sect_name != "$abs"
         opsynt = [lst[j][0] for j in range(3)]
         if opsynt[0:2] == ["num", "end"]:
             return (lst[0][1], gotrel)
         if opsynt[0] == "id":
             lbl = lst[0][1]
-            if SectName != -1 and lbl in labels[SectName]:
-                Value = labels[SectName][lbl]
+            if sect_name != -1 and lbl in labels[sect_name]:
+                Value = labels[sect_name][lbl]
                 if relcontext and lbl not in exts:
                     gotrel = True
             elif lbl in abses:
                 Value = abses[lbl]
                 gotrel = False
             elif lbl == "*":
-                Value = PC
+                Value = counter
                 gotrel = relcontext
             else:
                 if opsynt[1] == ":":
@@ -602,8 +603,8 @@ def asmline(s, linum, passno):
                         lst[2][2],
                         "External label " + lbl2 + " can't be used as displacement",
                     )
-                if SectName != -1 and lbl2 in labels[SectName] or lbl2 == "*":
-                    Value2 = PC if lbl2 == "*" else labels[SectName][lbl2]
+                if sect_name != -1 and lbl2 in labels[sect_name] or lbl2 == "*":
+                    Value2 = counter if lbl2 == "*" else labels[sect_name][lbl2]
                     if relcontext and lbl2 not in exts and gotrel:
                         if sign == 1:
                             raise SE(lst[2][2], "Relocatables can only be subtracted")
@@ -639,7 +640,7 @@ def asmline(s, linum, passno):
         return 0
 
     cmd = lexline(linum, s) + [("end", 0, 0)] * 3
-    if errorMsg != "":
+    if error_msg != "":
         return
     if cmd[0][0] == "emp":
         return ("", 0, [])
@@ -722,14 +723,14 @@ def asmline(s, linum, passno):
                 else:
                     Value, gotrel = parse_exp(cmd[next + 2 : next + 5])
                     test_end(cmd[next + 5])
-                    if Rel and gotrel:
-                        rellist[SectName] += [PC + 1]
+                    if rel and gotrel:
+                        rel_list[sect_name] += [counter + 1]
                     if (
                         cmd[next + 2][0] == "id"
                         and cmd[next + 2][1] in exts
                         and not macdef
                     ):
-                        exts[cmd[next + 2][1]] += [(SectName, PC + 1)]
+                        exts[cmd[next + 2][1]] += [(sect_name, counter + 1)]
                     return (label, 2, [x, Value])
             else:
                 if cmd[next + 1][0] != "end":
@@ -748,10 +749,10 @@ def asmline(s, linum, passno):
                     )
                 Value, gotrel = parse_exp(cmd[next : next + 3])
                 test_end(cmd[next + 3])
-                if Rel and opcode != "lchk" and gotrel:
-                    rellist[SectName] += [PC + 1]
+                if rel and opcode != "lchk" and gotrel:
+                    rel_list[sect_name] += [counter + 1]
                 if cmd[next][0] == "id" and cmd[next][1] in exts and not macdef:
-                    exts[cmd[next][1]] += [(SectName, PC + 1)]
+                    exts[cmd[next][1]] += [(sect_name, counter + 1)]
                 if opcode == "lchk":
                     return (label, 0, [])
                 return (label, 2, [bincode, Value])
@@ -866,7 +867,7 @@ def asmline(s, linum, passno):
         if cat == spec:
             if opcode == "ds":
                 Value, _ = parse_exp(cmd[next : next + 3], onlyabs=True)
-                DsIns = True
+                ds_ins = True
                 return (label, Value, [0] * Value)
             if opcode == "set":
                 if cmd[next][0] != "id":
@@ -884,7 +885,7 @@ def asmline(s, linum, passno):
             if opcode == "dc":
                 img = []
                 empty = True
-                DsIns = True
+                ds_ins = True
                 while cmd[next][0] != "end":
                     empty = False
                     if cmd[next][0] == "num":
@@ -906,14 +907,14 @@ def asmline(s, linum, passno):
                             exp = cmd[next : next + 3]
                             exp = [x if x[0] != "," else ["end", 0, 0] for x in exp]
                             Value, gotrel = parse_exp(exp)
-                            if Rel and gotrel:
-                                rellist[SectName] += [PC + len(img)]
+                            if rel and gotrel:
+                                rel_list[sect_name] += [counter + len(img)]
                             if (
                                 cmd[next][0] == "id"
                                 and cmd[next][1] in exts
                                 and not macdef
                             ):
-                                exts[cmd[next][1]] += [(SectName, PC + len(img))]
+                                exts[cmd[next][1]] += [(sect_name, counter + len(img))]
 
                             img += [Value]
 
@@ -942,31 +943,31 @@ def asmline(s, linum, passno):
                 if addr < 0:
                     raise SE(cmd[next][2], "Illegal number")
                 test_end(cmd[next + 1])
-                if Rel:
-                    rsects[SectName] = PC
-                    Rel = False
-                if Tpl:
-                    Tpl = False
-                    tpls[tplName]["_"] = PC
-                PC = addr
-                SectName = "$abs"
+                if rel:
+                    rsects[sect_name] = counter
+                    rel = False
+                if tpl:
+                    tpl = False
+                    tpls[tpl_name]["_"] = counter
+                counter = addr
+                sect_name = "$abs"
                 return ("", -1, 0)
             if opcode == "tplate":
                 if label != "":
                     raise SE(0, "Label not allowed")
                 if cmd[next][0] != "id":
                     raise SE(cmd[next][2], "Name expected")
-                if Rel:
-                    rsects[SectName] = PC
-                Rel = False
+                if rel:
+                    rsects[sect_name] = counter
+                rel = False
                 if cmd[next][1] in tpls and passno == 1:
                     raise SE(cmd[next][2], "Template already defined")
-                PC = 0
-                Tpl = True
-                tplName = cmd[next][1]
-                if tplName not in tpls:
-                    tpls[tplName] = {}
-                SectName = -1
+                counter = 0
+                tpl = True
+                tpl_name = cmd[next][1]
+                if tpl_name not in tpls:
+                    tpls[tpl_name] = {}
+                sect_name = -1
                 return ("", -1, 0)
             if opcode == "rsect":
                 if label != "":
@@ -974,64 +975,64 @@ def asmline(s, linum, passno):
                 if cmd[next][0] != "id":
                     raise SE(cmd[next][2], "Name expected")
                 test_end(cmd[next + 1])
-                if Rel:
-                    rsects[SectName] = PC
-                Rel = True
-                if Tpl:
-                    Tpl = False
-                    tpls[tplName]["_"] = PC
-                SectName = cmd[next][1]
-                if SectName not in rsects:
-                    rsects[SectName] = 0
-                    PC = 0
-                    labels[SectName] = {}
-                    ents[SectName] = {}
-                    rellist[SectName] = []
+                if rel:
+                    rsects[sect_name] = counter
+                rel = True
+                if tpl:
+                    tpl = False
+                    tpls[tpl_name]["_"] = counter
+                sect_name = cmd[next][1]
+                if sect_name not in rsects:
+                    rsects[sect_name] = 0
+                    counter = 0
+                    labels[sect_name] = {}
+                    ents[sect_name] = {}
+                    rel_list[sect_name] = []
                 else:
-                    PC = rsects[SectName]
+                    counter = rsects[sect_name]
                 return (label, -1, cmd[next][1])
             if opcode == "ext":
                 test_end(cmd[next])
-                if label not in exts or label not in labels[SectName]:
+                if label not in exts or label not in labels[sect_name]:
                     exts[label] = []
                     return ("!" + label, 0, cmd[next][1])
                 return ("", 0, 0)
             if opcode == "end":
                 if label != "":
                     raise SE(0, "Illegal label")
-                if Rel == True:
-                    rsects[SectName] = PC
+                if rel == True:
+                    rsects[sect_name] = counter
                 if passno == 1:
-                    if Tpl:
-                        tpls[tplName]["_"] = PC
-                        Tpl = False
+                    if tpl:
+                        tpls[tpl_name]["_"] = counter
+                        tpl = False
                     for name in rsects:
                         rsects[name] = 0
-                Rel = False
+                rel = False
                 return ("$$$", -2, 0)
         else:
-            errLine = linum
+            err_line = linum
             EP("Internal error: " + opcode + " " + str(cat) + str(linum))
 
 
 def asm(assmtext=None):
-    global SectName
-    global rellist
+    global sect_name
+    global rel_list
     global exts
     global ents
     global abses
     global labels
     global rsects
-    global PC
+    global counter
     global text
     global macdef
     global mname
-    global Tpl
+    global tpl
     global tpls
-    global DsIns
-    global tplName
+    global ds_ins
+    global tpl_name
     global generated
-    global errLine
+    global err_line
 
     if assmtext != None:
         text = assmtext
@@ -1068,13 +1069,13 @@ def asm(assmtext=None):
                         # EP (" "*(e.ind))
                     elif e.ind != -1:
                         EP(s, term=False)
-                    errLine = linum
+                    err_line = linum
                     EP("On line " + str(linum) + " ERROR: " + e.msg)
                     return
                 else:
                     size = 0
             except TypeError:
-                errline = linum
+                err_line = linum
                 return
 
             if macdef and size != -4 and size != -3:  # accumulate macro definition
@@ -1121,34 +1122,34 @@ def asm(assmtext=None):
                     ]  # dummy output to get addresses in listing
                 continue
             elif size >= 0:  # deal with the label off a true instruction
-                if Tpl and passno == 1:
-                    if not DsIns and size > 0:
-                        errLine = linum
+                if tpl and passno == 1:
+                    if not ds_ins and size > 0:
+                        err_line = linum
                         EP(
                             "On line "
                             + str(linum)
                             + " ERROR: Only dc/ds allowed in templates"
                         )
-                    DsIns = False
+                    ds_ins = False
                 if label != "" and passno == 1:
                     if not ready:
-                        errLine = linum
+                        err_line = linum
                         EP(
                             "On line "
                             + str(linum)
                             + " ERROR: 'asect' or 'rsect' expected"
                         )
-                    addr = PC
-                    if Tpl:
+                    addr = counter
+                    if tpl:
                         if label[0] == ">":
-                            errLine = linum
+                            err_line = linum
                             EP(
                                 "On line "
                                 + str(linum)
                                 + " ERROR: exts in template not allowed"
                             )
-                        if label in tpls[tplName]:
-                            errLine = linum
+                        if label in tpls[tpl_name]:
+                            err_line = linum
                             EP(
                                 "On line "
                                 + str(linum)
@@ -1156,13 +1157,13 @@ def asm(assmtext=None):
                                 + label
                                 + "' already defined"
                             )
-                        tpls[tplName][label] = PC
+                        tpls[tpl_name][label] = counter
                     if label[0] == ">":
                         label = label[1:]
-                        ents[SectName][label] = PC
+                        ents[sect_name][label] = counter
                     if label[0] == "!":
                         if label[1] == ">":
-                            errLine = linum
+                            err_line = linum
                             EP(
                                 "On line "
                                 + str(linum)
@@ -1172,8 +1173,8 @@ def asm(assmtext=None):
                             )
                         label = label[1:]
                         addr = 0
-                    if not Tpl and label in labels[SectName]:
-                        errLine = linum
+                    if not tpl and label in labels[sect_name]:
+                        err_line = linum
                         EP(
                             "On line "
                             + str(linum)
@@ -1181,22 +1182,22 @@ def asm(assmtext=None):
                             + label
                             + " already defined"
                         )
-                    if not Tpl:
-                        labels[SectName][label] = addr
-                    if not Rel:
-                        abses[label] = PC
+                    if not tpl:
+                        labels[sect_name][label] = addr
+                    if not rel:
+                        abses[label] = counter
 
-            if passno == 2 and size > 0 and not Tpl:
+            if passno == 2 and size > 0 and not tpl:
                 if not ready:
-                    errLine = linum
+                    err_line = linum
                     EP("On line " + str(linum) + " ERROR: 'asect' or 'rsect' expected")
-                output += [(linind, PC, code, SectName)]
-            if passno == 2 and Tpl:
+                output += [(linind, counter, code, sect_name)]
+            if passno == 2 and tpl:
                 output += [
-                    (linind, PC, [], "")
+                    (linind, counter, [], "")
                 ]  # dummy output to get addresses in listing
             if size > 0:
-                PC += size
+                counter += size
         if not finished:
             EP("ERROR: file ends before end of program")
     return output
@@ -1379,7 +1380,7 @@ def pretty_print(obj1, src, prtOP=True):
         print("\nSECTIONS:\nName\tSize\tRelocation offsets\n")
 
         for name in rsects:
-            relsn = rellist[name]
+            relsn = rel_list[name]
             strg = ""
             for r in relsn:
                 strg += format(r, "02x") + " "
@@ -1457,14 +1458,14 @@ def genoc(output, objbuff=None):
         if objbuff == None:
             objfile.write("NAME " + st + "\n")
             objfile.write("DATA " + " ".join(map(shex, sects[st])) + "\n")
-            objfile.write("REL  " + " ".join(map(shex, rellist[st])) + "\n")
+            objfile.write("REL  " + " ".join(map(shex, rel_list[st])) + "\n")
             en = ents[st]
             for e in en:
                 objfile.write("NTRY " + e + " " + shex(en[e]) + "\n")
         else:
             objbuff += "NAME " + st + "\n" + "DATA "
             objbuff += " ".join(map(shex, sects[st])) + "\n"
-            objbuff += "REL  " + " ".join(map(shex, rellist[st])) + "\n"
+            objbuff += "REL  " + " ".join(map(shex, rel_list[st])) + "\n"
             en = ents[st]
             for e in en:
                 objbuff += "NTRY " + e + " " + shex(en[e]) + "\n"
@@ -1559,10 +1560,10 @@ pars = []  # global list of parameters of the current macro
 
 
 def EP(s, term=True):
-    global retError, errorMsg
+    global ret_error, error_msg
     # print("**", retError)
-    if retError:
-        errorMsg = s
+    if ret_error:
+        error_msg = s
         # if errorMsg !="":
         #    errorMsg = errorMsg + "\n"+s
     else:
@@ -1673,14 +1674,16 @@ def commasep(tokens):
 
 
 def ismstack(l, s):
-    global mstack, mvarsm, errLine, errorMsg
+    global mstack, mvarsm, err_line, error_msg
 
     def diag(pos, msg, brief=False):
+        global err_line
+
         if brief:
-            errLine = l
+            err_line = l
             prefix = "On line " + str(l) + " ERROR: "
         else:
-            errLine = l
+            err_line = l
             prefix = (
                 "On line "
                 + str(l)
@@ -1693,7 +1696,7 @@ def ismstack(l, s):
         EP(prefix + msg)
 
     tokens = lexline(l, s)
-    if errorMsg != "":
+    if error_msg != "":
         return
 
     mstackind = 0
@@ -1825,37 +1828,37 @@ def compile_asm(codetext=None, cdm8ver=4):
             self.dbg = False
             self.save = False
 
-    global retError, errorMsg
-    global text, argsPC, Rel, rellist, exts, ents, abses, labels, rsects
-    global macros, labels, ents, tpls, Tpl, DsIns, tplName, generated, args, gotminus
+    global ret_error, error_msg
+    global text, rel, rel_list, exts, ents, abses, labels, rsects
+    global macros, labels, ents, tpls, tpl, ds_ins, tpl_name, generated, args, got_minus
     global mcount, mcalls, macdef, mname, marity, mvars, macros, mstack, pars
-    global errLine, iset
+    global err_line, iset, sect_name, lst_me, counter
 
     # Init all the global vars
 
-    retError = True
-    errorMsg = ""
+    ret_error = True
+    error_msg = ""
     args = Args(cdm8ver)
     text = []
-    PC = 0
-    Rel = False
-    rellist = {}
+    counter = 0
+    rel = False
+    rel_list = {}
     exts = {}
     ents = {}
     abses = {}
     labels = {}
     rsects = {}
     macros = {}
-    SectName = None
+    sect_name = None
     labels["$abs"] = {}
     ents["$abs"] = {}
     tpls = {}
-    Tpl = False
-    DsIns = False
-    tplName = ""
+    tpl = False
+    ds_ins = False
+    tpl_name = ""
     generated = []
-    gotminus = False
-    errline = None
+    got_minus = False
+    err_line = None
     lst_me = False  # flag: include macro expansions in listing
     # macro vars as well
     mcount = 1  # nonce for macros
@@ -1894,19 +1897,19 @@ def compile_asm(codetext=None, cdm8ver=4):
     # print("compiling")
 
     # print(text)
-    if errorMsg != "":
+    if error_msg != "":
         # print("result", errorMsg) #debug
-        return None, None, errorMsg
+        return None, None, error_msg
 
     result = asm()
-    if errorMsg != "":
+    if error_msg != "":
         # print("result", errorMsg) #debug
-        return None, None, errorMsg
+        return None, None, error_msg
     objstr = ""
     objstr = genoc(result, objstr)
-    if errorMsg != "":
+    if error_msg != "":
         # print("objstr", errorMsg)#debug
-        return None, None, errorMsg
+        return None, None, error_msg
     codelist = pretty_print(result, text, False)
     return objstr, codelist, None
 
