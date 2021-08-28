@@ -13,7 +13,7 @@
 
 # Python 2 and 3 compatibility
 from __future__ import absolute_import, division, print_function
-from typing import Any, Optional, Tuple, Union, List, Dict
+from typing import IO, Any, Optional, Tuple, Union, List, Dict
 
 try:
     input = raw_input  # type: ignore # Python 3 style input()
@@ -61,10 +61,10 @@ class Context:
         self.save = False
 
         self.lst = False
-        self.sym = None
 
         self.filename = None  # type: Optional[str]
         self.text = []  # type: List[str]
+        self.raw_text = []  # type: List[str]
         self.counter = 0
         self.rel = False
         self.rel_list = {}  # type: Dict[str, List[int]]
@@ -96,8 +96,6 @@ class Context:
 
 
 # Used by CocoIDE when imported
-ret_error = False
-error_msg = ""
 err_line = None
 
 # Instruction set
@@ -199,7 +197,7 @@ iset = {
 
 
 class CocAs(tk.Tk):
-    def __init__(self, master=None, name="cocas", exitroot=False, sym=True):
+    def __init__(self, master=None):
         self.master = master
         self.mainWin = tk.Toplevel(master=master)
         self.mainWin.lift()
@@ -250,7 +248,7 @@ class CocAs(tk.Tk):
         linkButton = tk.Button(
             buttonBar,
             text="Assemble to .obj File",
-            command=lambda: self.asmFile(sym=sym),
+            command=self.asmFile,
         )  # , height=2)
         linkButton.pack(side=tk.LEFT)
         # linkButton = tk.Button(buttonBar, text="Asse Logisim Image", command=self.linkFiles)#, height=2)
@@ -282,14 +280,11 @@ class CocAs(tk.Tk):
             self.linkText.config(text=filepath + "\n")
             self.statusText.delete("1.0", tk.END)
 
-    def asmFile(self, event=None, sym=False):
-        global error_msg
-
+    def asmFile(self, event=None):  # type: (Any) -> None
         error_msg = ""
 
         ctx = Context()
         ctx.lst = True
-        ctx.sym = sym
 
         self.statusText.delete("1.0", tk.END)
         if not self.asmfile:
@@ -332,7 +327,6 @@ class CocAs(tk.Tk):
             error_msg = "TypeError"
             # return "break"
         except Exception as e:
-            # raise
             error_msg = str(e)
             # return "break"
         if error_msg:
@@ -347,38 +341,81 @@ class CocAs(tk.Tk):
             self.master.destroy()  # type: ignore
 
 
-class LE(Exception):
-    def __init__(self, i, m):
-        global err_line
-        # err_line = i
-        # print("LE",i,m)#debug
-        global ret_error, error_msg
-        # print("**", retError)
-        # if retError:
-        #    error_msg = "LINE "+ str(i) +": "+m
-        # else:
-        error_msg = m
-        # error_msg += "\n"+m
-        self.ind = i
-        self.msg = m
+class AssemblerError:
+    def __init__(
+        self, ctx, line, col, message
+    ):  # type (Context, int, int, str) -> None
+        self.ctx = ctx
+        self.line = line
+        self.col = col
+        self.message = message
+
+    def dump(self):  # type: () -> None
+        if self.col >= 0:
+            source = "{}\n{}^".format(
+                self.ctx.raw_text[self.line - 1], " " * (self.col + 1)
+            )
+        else:
+            source = self.ctx.raw_text[self.line - 1]
+        print(
+            "On line {} \n{}\nERROR: {}".format(
+                self.line,
+                source,
+                self.message,
+            )
+        )
 
 
-class SE(Exception):
-    def __init__(self, ctx, i, m):
-        global ret_error, error_msg
-        # print("SE",i,m)#debug
-        # if retError:
-        #    error_msg = "LINE "+ str(i) +": "+m
-        # else:
-        if not ctx.macdef:
-            error_msg = m
-        # error_msg += "\n"+m
-        self.ind = i
-        self.msg = m
+class LexerError(AssemblerError):
+    def __init__(
+        self, ctx, line, col, message
+    ):  # type (Context, int, int, str) -> None
+        super().__init__(ctx, line, col, message)
 
 
-def lex(ctx, s):
-    def hexbyte(s):
+class SyntaxError(AssemblerError):
+    def __init__(
+        self, ctx, line, col, message
+    ):  # type (Context, int, int, str) -> None
+        super().__init__(ctx, line, col, message)
+
+
+class MacroError(AssemblerError):
+    def __init__(
+        self, ctx, line, col, message, user_message=False
+    ):  # type (Context, int, int, str, bool) -> None
+        super().__init__(ctx, line, col, message)
+        self.user_message = user_message
+
+    def dump(self):  # type: () -> None
+        if self.col >= 0:
+            source = "{}\n{}^".format(
+                self.ctx.raw_text[self.line - 1], " " * (self.col + 1)
+            )
+        else:
+            source = self.ctx.raw_text[self.line - 1]
+        if self.user_message:
+            print(
+                "On line {} \n{}\nERROR: {}".format(
+                    self.line,
+                    source,
+                    self.message,
+                )
+            )
+        else:
+            print(
+                "On line {} \n{}\nERROR: In Macro: {}".format(
+                    self.line,
+                    source,
+                    self.message,
+                )
+            )
+
+
+def lex(
+    ctx, s, line, col
+):  # type: (Context, str, int, int) -> Union[AssemblerError, List[Any]]
+    def hexbyte(s):  # type: (str) -> int
         w = s
         w = w.lower()
         k = "0123456789abcdef".find(w[0])
@@ -408,7 +445,7 @@ def lex(ctx, s):
     elif x == "$":
         CAT = "par"
     else:
-        raise LE(i, "Illegal character '" + x + "'")
+        return LexerError(ctx, line, col, "Illegal character ‘{}’".format(x))
 
     if CAT == "ws":
         while x == " " or x == "\t":
@@ -436,23 +473,26 @@ def lex(ctx, s):
             CAT = "reg"
             reg = int(VAL[1])
             if reg > 3:
-                raise LE(i, "Illegal register number " + str(reg))
+                return LexerError(
+                    ctx, line, col, "Illegal register number {}".format(reg)
+                )
             return [CAT, i, reg]
         return [CAT, i, VAL]
     elif CAT == "par":
         if i < ln - 1:
             if not s[i + 1].isdigit():
-                raise LE(i, "Expect a digit after a $")
+                return LexerError(ctx, line, col + 1, "Expect a digit after a $")
             return [CAT, i + 2, int(s[i + 1])]
+        return LexerError(ctx, line, col + 1, "Expect a digit after a $")
     elif CAT == "num":
         if ln - 1 >= i + 1 and s[i : i + 2] == "0x":
             if ctx.got_minus:
-                raise LE(i, "Signed hexadecimal not allowed")
+                return LexerError(ctx, line, col, "Signed hexadecimal not allowed")
             if ln - 1 < i + 3:
-                raise LE(i, "Illegal hexadecimal")
+                return LexerError(ctx, line, col, "Illegal hexadecimal")
             k = hexbyte(s[i + 2 : i + 4])
             if k < 0:
-                raise LE(i, "Illegal hexadecimal")
+                return LexerError(ctx, line, col, "Illegal hexadecimal")
             if ln - 1 > i + 3:
                 return [CAT, i + 4, k]
             else:
@@ -460,13 +500,13 @@ def lex(ctx, s):
 
         if ln - 1 >= i + 1 and s[i : i + 2] == "0b":
             if ctx.got_minus:
-                raise LE(i, "Signed binary not allowed")
+                return LexerError(ctx, line, col, "Signed binary not allowed")
             if ln - 1 < i + 9:
-                raise LE(i, "Illegal binary")
+                return LexerError(ctx, line, col, "Illegal binary")
             k = 0
             for x in s[i + 2 : i + 10]:
                 if "01".find(x) < 0:
-                    raise LE(i, "Illegal binary")
+                    return LexerError(ctx, line, col, "Illegal binary")
                 k = k * 2 + int(x)
             if ln - 1 > i + 9:
                 return [CAT, i + 10, k]
@@ -479,20 +519,20 @@ def lex(ctx, s):
             k = 10 * k + int(x)
             if i == ln - 1:
                 if k > 255:
-                    raise LE(i, "Decimal out of range")
+                    return LexerError(ctx, line, col, "Decimal out of range")
                 return [CAT, -1, k]
             else:
                 i = i + 1
                 x = s[i]
         if k > 255:
-            raise LE(i, "Decimal out of range")
+            return LexerError(ctx, line, col, "Decimal out of range")
         return [CAT, i, k]
     elif CAT == "str":
         w = ""
         x = ""
         while x != '"':
             if i == ln - 1:
-                raise LE(i, "Runaway string")
+                return LexerError(ctx, line, col, "Runaway string")
             if x != "\\":
                 w = w + x
                 i = i + 1
@@ -503,7 +543,9 @@ def lex(ctx, s):
                 w = w + '"'
                 i = i + 2
             else:
-                raise LE(i, "Unknown escape character \\" + s[i + 1])
+                return LexerError(
+                    ctx, line, col, "Unknown escape character \\" + s[i + 1]
+                )
             x = s[i]
         if i == ln - 1:
             return [CAT, -1, w]
@@ -522,34 +564,21 @@ def lex(ctx, s):
         return [CAT, i, 0]
 
 
-def lexline(ctx, linum, s):
-    global err_line
+def lexline(
+    ctx, linum, s
+):  # type: (Context, int, str) -> Union[AssemblerError, List[Tuple[str, Union[str,int], int]]]
     ctx.got_minus = False
     s0 = s
     r = []  # type: List[Tuple[str, Union[str,int], int]]
     ind = 0
     ptr = 0
     while ind >= 0:
-        cat = ""
-        val = 0
-        ind = 0
-        try:
-            [cat, ind, val] = lex(ctx, s)
-            # print("**", cat)# debug
-        except LE as e:
-            err_line = linum  # Picked up by cocoide
-            EP(
-                "On line "
-                + str(linum)
-                + " \n"
-                + str(s0[0 : ptr + e.ind])
-                + str(s0[ptr + e.ind :])
-                + "\nERROR: "
-                + e.msg
-            )
-        # if not cat or not ind or not val:
-        #    err_line = linum # Picked up by cocoide
-        #    EP( "On line "+str(linum)+ "ERROR: Bad OP Code" )
+        res = lex(ctx, s, linum, ptr)
+        if isinstance(res, AssemblerError):
+            return res
+        else:
+            [cat, ind, val] = res
+
         if (cat == "emp" and len(r) == 0) or cat != "emp":
             r = r + [(cat, val, ptr)]
         if ind >= 0:
@@ -558,10 +587,12 @@ def lexline(ctx, linum, s):
     return r
 
 
-def asmline(ctx, s, linum, passno):
-    global error_msg, err_line
-
-    def parse_exp(lst, onlyabs=False):
+def asmline(
+    ctx, s, linum, passno
+):  # type: (Context, str, int, int) -> Union[AssemblerError, Tuple[str, int, Any]]
+    def parse_exp(
+        lst, onlyabs=False
+    ):  # type: (list, bool) -> Union[Tuple[int, bool], SyntaxError]
         gotrel = False
         relcontext = ctx.sect_name != "$abs"
         opsynt = [lst[j][0] for j in range(3)]
@@ -581,79 +612,95 @@ def asmline(ctx, s, linum, passno):
                 gotrel = relcontext
             else:
                 if opsynt[1] == ":":
-                    raise SE(ctx, -1, lst[2][1])
-                raise SE(ctx, lst[0][2], "Label " + lbl + " not found")
+                    return SyntaxError(ctx, linum, -1, lst[2][1])
+                return SyntaxError(ctx, linum, lst[0][2], "Label " + lbl + " not found")
             if opsynt[1] == "end" or opsynt[1] == ":":
                 if onlyabs and gotrel:
-                    raise SE(ctx, lst[0][2], "Only absolute labels allowed here")
+                    return SyntaxError(
+                        ctx, linum, lst[0][2], "Only absolute labels allowed here"
+                    )
                 return (Value, gotrel)
             if opsynt[1] == "+":
                 sign = 1
             elif opsynt[1] == "-":
                 sign = -1
             else:
-                raise SE(ctx, lst[1][2], "Only + or - allowed here")
+                return SyntaxError(ctx, linum, lst[1][2], "Only + or - allowed here")
             # extension for NSU ######################
 
             if opsynt[2] == "id":
                 lbl2 = lst[2][1]
                 if lbl2 in ctx.exts:
-                    raise SE(
+                    return SyntaxError(
                         ctx,
+                        linum,
                         lst[2][2],
                         "External label " + lbl2 + " can't be used as displacement",
                     )
                 if ctx.sect_name and lbl2 in ctx.labels[ctx.sect_name] or lbl2 == "*":
                     Value2 = (
-                        ctx.counter if lbl2 == "*" else ctx.labels[ctx.sect_name][lbl2]
+                        ctx.labels[ctx.sect_name][lbl2]
+                        if ctx.sect_name
+                        else ctx.counter
                     )
                     if relcontext and lbl2 not in ctx.exts and gotrel:
                         if sign == 1:
-                            raise SE(
-                                ctx, lst[2][2], "Relocatables can only be subtracted"
+                            return SyntaxError(
+                                ctx,
+                                linum,
+                                lst[2][2],
+                                "Relocatables can only be subtracted",
                             )
                         else:
                             gotrel = False  # difference between two relocs
                     if gotrel and onlyabs:
-                        raise SE(
-                            ctx, lst[0][2], "Only absolute result is acceptable here"
+                        return SyntaxError(
+                            ctx,
+                            linum,
+                            lst[0][2],
+                            "Only absolute result is acceptable here",
                         )
                     return (((Value + sign * Value2) + 256) % 256, gotrel)
                 if lbl2 in ctx.abses:
                     if gotrel and onlyabs:
-                        raise SE(
-                            ctx, lst[0][2], "Only absolute result is acceptable here"
+                        return SyntaxError(
+                            ctx,
+                            linum,
+                            lst[0][2],
+                            "Only absolute result is acceptable here",
                         )
                     Value2 = ctx.abses[lbl2]
                     return (((Value + sign * Value2) + 256) % 256, gotrel)
-                raise SE(ctx, lst[2][2], "Label " + lbl2 + " not found")
+                return SyntaxError(
+                    ctx, linum, lst[2][2], "Label " + lbl2 + " not found"
+                )
 
             ########################################
             elif opsynt[2] == "num":
                 if onlyabs and gotrel:
-                    raise SE(ctx, lst[0][2], "Only absolute labels allowed here")
+                    return SyntaxError(
+                        ctx, linum, lst[0][2], "Only absolute labels allowed here"
+                    )
                 return (((Value + sign * lst[2][1]) + 256) % 256, gotrel)
             else:
-                raise SE(ctx, lst[2][2], "Expecting a number or a label here")
+                return SyntaxError(
+                    ctx, linum, lst[2][2], "Expecting a number or a label here"
+                )
         elif opsynt[0:3] == ["-", "num", "end"]:
             if lst[1][1] > 128:
-                raise SE(ctx, lst[1][2], "Negative out of range")
+                return SyntaxError(ctx, linum, lst[1][2], "Negative out of range")
             return (((lst[1][1] ^ 0xFF) + 1) % 256, gotrel)
         else:
-            raise SE(ctx, lst[0][2], "Label or number expected")
+            return SyntaxError(ctx, linum, lst[0][2], "Label or number expected")
 
-    def test_end(item):
-        if item[0] != "end":
-            raise SE(ctx, item[2], "Unexpected text")
-        return 0
-
-    cmd = lexline(ctx, linum, s) + [("end", 0, 0)] * 3
-    if error_msg != "":
-        return None
+    lex_res = lexline(ctx, linum, s)
+    if isinstance(lex_res, AssemblerError):
+        return lex_res
+    cmd = lex_res + [("end", 0, 0)] * 3
     if cmd[0][0] == "emp":
         return ("", 0, [])
     if cmd[0][0] != "id":
-        raise SE(ctx, cmd[0][2], "Label or opcode expected")
+        return SyntaxError(ctx, linum, cmd[0][2], "Label or opcode expected")
     else:
         next = 1
         label = ""
@@ -671,72 +718,98 @@ def asmline(ctx, s, linum, passno):
                 if cmd[2][0] == "end":
                     return (label, 0, [])
             else:
-                raise SE(ctx, cmd[2][2], "Illegal opcode")
+                return SyntaxError(ctx, linum, cmd[2][2], "Illegal opcode")
         if opcode not in iset:
-            # print(pos, "Invalid opcode: "+opcode)#debug
-            raise SE(ctx, pos, "Invalid opcode: " + opcode)
+            return SyntaxError(ctx, linum, pos, "Invalid opcode: " + opcode)
         (bincode, cat) = iset[opcode]
         if cat == bi:
             if cmd[next][0] != "reg":
-                raise SE(ctx, cmd[next][2], "Register expected")
+                return SyntaxError(ctx, linum, cmd[next][2], "Register expected")
             if cmd[next + 1][0] != ",":
-                raise SE(ctx, cmd[next][2], "Comma expected")
+                return SyntaxError(ctx, linum, cmd[next + 1][2], "Comma expected")
             if cmd[next + 2][0] != "reg":
-                raise SE(ctx, cmd[next + 2][2], "Register expected")
-            test_end(cmd[next + 3])
+                return SyntaxError(ctx, linum, cmd[next + 2][2], "Register expected")
+            if cmd[next + 3][0] != "end":
+                return SyntaxError(ctx, linum, cmd[next + 3][2], "Unexpected text")
             x = bincode + 4 * int(cmd[next][1]) + int(cmd[next + 2][1])
             return (label, 1, [x])
         if cat == un:
             # print("*", args.v3)#debug
-            # if opcode in ("ldsp","stsp") and not args.v3: raise SE(ctx, cmd[next][2],"Use option -v3 to compile Mark 3 instructions")
+            # if opcode in ("ldsp","stsp") and not args.v3: return SyntaxError(ctx, linum, cmd[next][2],"Use option -v3 to compile Mark 3 instructions")
             if opcode in ("ldsa", "addsp", "setsp", "pushall", "popall") and ctx.v3:
-                raise SE(
-                    ctx, cmd[next][2], "option -v3 forbids use of Mark 4 instructions"
+                return SyntaxError(
+                    ctx,
+                    linum,
+                    cmd[next][2],
+                    "option -v3 forbids use of Mark 4 instructions",
                 )
-            if cmd[next][0] != "reg":
-                raise SE(ctx, cmd[next][2], "Register expected")
 
             if cmd[next][0] != "reg":
-                raise SE(ctx, cmd[next][2], "Register expected")
+                return SyntaxError(ctx, linum, cmd[next][2], "Register expected")
             x = bincode + int(cmd[next][1])
             if opcode == "ldi" or opcode == "ldsa":
                 if cmd[next + 1][0] != ",":
-                    raise SE(ctx, cmd[next + 1][2], "Comma expected")
+                    return SyntaxError(ctx, linum, cmd[next + 1][2], "Comma expected")
                 if passno == 1:
                     return (label, 2, [x, 0])
                 elif cmd[next + 2][0] == "str":
                     strVal = str(cmd[next + 2][1])
                     if len(strVal) > 1:
-                        raise SE(ctx, cmd[next + 2][2], "Single character expected")
+                        return SyntaxError(
+                            ctx, linum, cmd[next + 2][2], "Single character expected"
+                        )
                     if opcode == "ldsa":
-                        raise SE(
+                        return SyntaxError(
                             ctx,
+                            linum,
                             cmd[next + 2][2],
                             "ldsa requires a number or a template field",
                         )
                     return (label, 2, [x, ord(strVal[0])])
                 elif cmd[next + 3][0] == ".":  # template reference
                     if cmd[next + 2][0] != "id":
-                        raise SE(ctx, cmd[next + 2][2], "Template name expected")
+                        return SyntaxError(
+                            ctx, linum, cmd[next + 2][2], "Template name expected"
+                        )
                     if cmd[next + 2][1] not in ctx.tpls:
-                        raise SE(ctx, cmd[next + 2][2], "Unknown template")
-                    tn = cmd[next + 2][1]
+                        return SyntaxError(
+                            ctx, linum, cmd[next + 2][2], "Unknown template"
+                        )
+                    tn = str(cmd[next + 2][1])
                     if cmd[next + 4][0] != "id":
-                        raise SE(ctx, cmd[next + 4][2], "Field name expected")
+                        return SyntaxError(
+                            ctx, linum, cmd[next + 4][2], "Field name expected"
+                        )
                     if cmd[next + 4][1] not in ctx.tpls[tn]:
-                        raise SE(ctx, cmd[next + 4][2], "Unknown field name")
+                        return SyntaxError(
+                            ctx, linum, cmd[next + 4][2], "Unknown field name"
+                        )
                     if cmd[next + 5][0] != "end":
-                        raise SE(
+                        return SyntaxError(
                             ctx,
+                            linum,
                             cmd[next + 5][2],
                             "unexpected token after template field",
                         )
                     y = ctx.tpls[tn][cmd[next + 4][1]]
                     return (label, 2, [x, y])
                 else:
-                    Value, gotrel = parse_exp(cmd[next + 2 : next + 5])
-                    test_end(cmd[next + 5])
+                    res = parse_exp(cmd[next + 2 : next + 5])
+                    if isinstance(res, AssemblerError):
+                        return res
+                    Value, gotrel = res
+                    if cmd[next + 5][0] != "end":
+                        return SyntaxError(
+                            ctx, linum, cmd[next + 5][2], "Unexpected text"
+                        )
                     if ctx.rel and gotrel:
+                        if not ctx.sect_name:
+                            return SyntaxError(
+                                ctx,
+                                linum,
+                                cmd[next][2],
+                                "Internal: In rsect yet no name",
+                            )
                         ctx.rel_list[ctx.sect_name] += [ctx.counter + 1]
                     if (
                         cmd[next + 2][0] == "id"
@@ -747,7 +820,9 @@ def asmline(ctx, s, linum, passno):
                     return (label, 2, [x, Value])
             else:
                 if cmd[next + 1][0] != "end":
-                    raise SE(ctx, cmd[next + 1][2], "Only one operand expected")
+                    return SyntaxError(
+                        ctx, linum, cmd[next + 1][2], "Only one operand expected"
+                    )
                 return (label, 1, [x])
 
         if cat == br:
@@ -757,14 +832,23 @@ def asmline(ctx, s, linum, passno):
                 return (label, 2, [bincode, 0])
             else:
                 if opcode == "ldsa" and cmd[next + 2][0] not in ("num", "-"):
-                    raise SE(
+                    return SyntaxError(
                         ctx,
+                        linum,
                         cmd[next + 2][2],
                         "ldsa requires a number or a template field",
                     )
-                Value, gotrel = parse_exp(cmd[next : next + 3])
-                test_end(cmd[next + 3])
+                res = parse_exp(cmd[next : next + 3])
+                if isinstance(res, AssemblerError):
+                    return res
+                Value, gotrel = res
+                if cmd[next + 3][0] != "end":
+                    return SyntaxError(ctx, linum, cmd[next + 3][2], "Unexpected text")
                 if ctx.rel and opcode != "lchk" and gotrel:
+                    if not ctx.sect_name:
+                        return SyntaxError(
+                            ctx, linum, cmd[next][2], "Internal: In rsect yet no name"
+                        )
                     ctx.rel_list[ctx.sect_name] += [ctx.counter + 1]
                 if cmd[next][0] == "id" and cmd[next][1] in ctx.exts and not ctx.macdef:
                     ctx.exts[cmd[next][1]] += [(ctx.sect_name, ctx.counter + 1)]
@@ -773,8 +857,9 @@ def asmline(ctx, s, linum, passno):
                 return (label, 2, [bincode, Value])
         if cat == osix:
             if cmd[next][0] != "num":
-                raise SE(ctx, cmd[next][2], "Number expected")
-            test_end(cmd[next + 1])
+                return SyntaxError(ctx, linum, cmd[next][2], "Number expected")
+            if cmd[next + 1][0] != "end":
+                return SyntaxError(ctx, linum, cmd[next + 1][2], "Unexpected text")
             return (label, 2, [bincode, cmd[next][1]])
 
         if cat == zer:
@@ -789,7 +874,10 @@ def asmline(ctx, s, linum, passno):
                 mynext = next + 1
                 mymult = -1
             if cmd[mynext][0] == "num":
-                test_end(cmd[mynext + 1])
+                if cmd[mynext + 1][0] != "end":
+                    return SyntaxError(
+                        ctx, linum, cmd[mynext + 1][2], "Unexpected text"
+                    )
                 return (label, 2, [bincode, mymult * cmd[mynext][1]])
 
             if (
@@ -797,19 +885,23 @@ def asmline(ctx, s, linum, passno):
                 or cmd[mynext + 1][0] != "."
                 or cmd[mynext + 2][0] != "id"
             ):
-                raise SE(
+                return SyntaxError(
                     ctx,
+                    linum,
                     cmd[mynext][2],
                     "addsp/setsp instructions require a number or a template field operand",
                 )
             if cmd[mynext][1] not in ctx.tpls:
-                raise SE(
+                return SyntaxError(
                     ctx,
+                    linum,
                     cmd[mynext][2],
                     "Unknown template '" + str(cmd[mynext][1]) + "'",
                 )
-            test_end(cmd[mynext + 3])
-            tn = cmd[mynext][1]
+            if cmd[mynext + 3][0] != "end":
+                return SyntaxError(ctx, linum, cmd[mynext + 3][2], "Unexpected text")
+
+            tn = str(cmd[mynext][1])
             return (label, 2, [bincode, mymult * ctx.tpls[tn][cmd[mynext + 2][1]]])
 
         ################################################## M A C R O FACILITIES
@@ -818,38 +910,45 @@ def asmline(ctx, s, linum, passno):
                 if ctx.macdef:
                     return ("", -3, [])
                 if label != "":
-                    raise SE(ctx, 0, "Label not allowed")
+                    return SyntaxError(ctx, linum, 0, "Label not allowed")
                 if cmd[next][0] != "id":
-                    raise SE(ctx, cmd[next][2], "Name expected")
+                    return SyntaxError(ctx, linum, cmd[next][2], "Name expected")
                 ctx.mname = str(cmd[next][1])
                 if ctx.mname in iset:
                     if iset[ctx.mname][1] != mi:
-                        raise SE(
+                        return SyntaxError(
                             ctx,
+                            linum,
                             cmd[next][2],
                             "Opcode '" + ctx.mname + "' reserved by assembler",
                         )
                 if cmd[next + 1][0] != "/":
-                    raise SE(ctx, cmd[next + 1][2], "/ expected")
+                    return SyntaxError(ctx, linum, cmd[next + 1][2], "/ expected")
                 if cmd[next + 2][0] != "num":
-                    raise SE(ctx, cmd[next + 2][2], "Number expected")
-                test_end(cmd[next + 3])
-                ctx.marity = cmd[next + 2][1]
+                    return SyntaxError(ctx, linum, cmd[next + 2][2], "Number expected")
+                if cmd[next + 3][0] != "end":
+                    return SyntaxError(ctx, linum, cmd[next + 3][2], "Unexpected text")
+                ctx.marity = int(cmd[next + 2][1])
                 return ("", -3, [])
             elif opcode == "mend":
-                test_end(cmd[next])
+                if cmd[next][0] != "end":
+                    return SyntaxError(ctx, linum, cmd[next][2], "Unexpected text")
                 return ("", -4, [])
         if cat == mi:
             if passno == 2 or ctx.macdef:
                 return ("", 0, [])
             ctx.mcalls += 1
             if ctx.mcalls > 800:
-                raise SE(ctx, 0, "Too many macro expansions [>800]")
-            ctx.pars = commasep(ctx, cmd[next:])
+                return SyntaxError(ctx, linum, 0, "Too many macro expansions [>800]")
+            sep_res = commasep(ctx, linum, cmd[next:])
+            if isinstance(sep_res, AssemblerError):
+                return sep_res
+            ctx.pars = sep_res
             parno = len(ctx.pars)
             if opcode + "/" + str(parno) not in ctx.macros:
-                raise SE(
+                return SyntaxError(
                     ctx,
+                    linum,
                     cmd[next][2],
                     "Number of params ("
                     + str(parno)
@@ -878,10 +977,15 @@ def asmline(ctx, s, linum, passno):
                         + "mvars="
                         + str(ctx.mvars)
                     )
-                rslt = mxpand(ctx, s1, 0, parno)
+                rslt = mxpand(ctx, linum, s1, 0, parno)
+                if isinstance(rslt, AssemblerError):
+                    return rslt
                 if ctx.dbg:
                     print("after  => " + str(rslt))
-                if not ismstack(ctx, linum, rslt):
+                m_res = ismstack(ctx, linum, rslt)
+                if isinstance(m_res, AssemblerError):
+                    return m_res
+                if not m_res:
                     newbody += [rslt + "#" + chr(1)]
             ctx.mcount += 1
             return ("", -5, newbody)
@@ -891,20 +995,30 @@ def asmline(ctx, s, linum, passno):
             return ("", 0, [])
         if cat == spec:
             if opcode == "ds":
-                Value, _ = parse_exp(cmd[next : next + 3], onlyabs=True)
+                res = parse_exp(cmd[next : next + 3], onlyabs=True)
+                if isinstance(res, AssemblerError):
+                    return res
+                Value, _ = res
                 ctx.ds_ins = True
                 return (label, Value, [0] * Value)
             if opcode == "set":
                 if cmd[next][0] != "id":
-                    raise SE(ctx, cmd[next + 1][2], "Identifier expected")
+                    return SyntaxError(
+                        ctx, linum, cmd[next + 1][2], "Identifier expected"
+                    )
                 if cmd[next + 1][0] != "=":
-                    raise SE(ctx, cmd[next + 1][2], "'=' expected")
-                Value, _ = parse_exp(cmd[next + 2 : next + 5], onlyabs=True)
+                    return SyntaxError(ctx, linum, cmd[next + 1][2], "'=' expected")
+                res = parse_exp(cmd[next + 2 : next + 5], onlyabs=True)
+                if isinstance(res, AssemblerError):
+                    return res
+                Value, _ = res
                 if passno == 2:
                     return (label, -10, [Value])
                 alias = str(cmd[next][1])
                 if alias in ctx.abses:
-                    raise SE(ctx, cmd[next + 1][2], alias + " already defined")
+                    return SyntaxError(
+                        ctx, linum, cmd[next + 1][2], alias + " already defined"
+                    )
                 ctx.abses[alias] = Value
                 return (label, -10, [Value])
             if opcode == "dc":
@@ -917,7 +1031,9 @@ def asmline(ctx, s, linum, passno):
                         img += [cmd[next][1]]
                     elif cmd[next][0] == "-" and cmd[next + 1][0] == "num":
                         if int(cmd[next + 1][1]) > 128:
-                            raise SE(ctx, cmd[next + 1][2], "Negative out of range")
+                            return SyntaxError(
+                                ctx, linum, cmd[next + 1][2], "Negative out of range"
+                            )
                         img += [((int(cmd[next + 1][1]) ^ 255) + 1) % 256]
                         next += 1
                     elif cmd[next][0] == "str":
@@ -930,10 +1046,20 @@ def asmline(ctx, s, linum, passno):
                                 next += 2
                         else:
                             exp = cmd[next : next + 3]
-                            Value, gotrel = parse_exp(
+                            res = parse_exp(
                                 [x if x[0] != "," else ["end", 0, 0] for x in exp]
                             )
+                            if isinstance(res, AssemblerError):
+                                return res
+                            Value, gotrel = res
                             if ctx.rel and gotrel:
+                                if not ctx.sect_name:
+                                    return SyntaxError(
+                                        ctx,
+                                        linum,
+                                        cmd[next][2],
+                                        "Internal: In rsect yet no name",
+                                    )
                                 ctx.rel_list[ctx.sect_name] += [ctx.counter + len(img)]
                             if (
                                 cmd[next][0] == "id"
@@ -950,28 +1076,37 @@ def asmline(ctx, s, linum, passno):
                                 next += 2
 
                     else:
-                        raise SE(ctx, cmd[next][2], "Illegal constant")
+                        return SyntaxError(ctx, linum, cmd[next][2], "Illegal constant")
 
                     if cmd[next + 1][0] == ",":
                         empty = True
                         next += 2
                     elif cmd[next + 1][0] != "end":
-                        raise SE(ctx, cmd[next + 1][2], "Illegal separator")
+                        return SyntaxError(
+                            ctx, linum, cmd[next + 1][2], "Illegal separator"
+                        )
                     else:
                         return (label, len(img), img)
                 if empty:
-                    raise SE(ctx, cmd[next][2], "Data expected")
+                    return SyntaxError(ctx, linum, cmd[next][2], "Data expected")
 
             if opcode == "asect":
                 if label != "":
-                    raise SE(ctx, 0, "Label not allowed")
+                    return SyntaxError(ctx, linum, 0, "Label not allowed")
                 if cmd[next][0] != "num":
-                    raise SE(ctx, cmd[next][2], "Numerical address expected")
+                    return SyntaxError(
+                        ctx, linum, cmd[next][2], "Numerical address expected"
+                    )
                 addr = int(cmd[next][1])
                 if addr < 0:
-                    raise SE(ctx, cmd[next][2], "Illegal number")
-                test_end(cmd[next + 1])
+                    return SyntaxError(ctx, linum, cmd[next][2], "Illegal number")
+                if cmd[next + 1][0] != "end":
+                    return SyntaxError(ctx, linum, cmd[next + 1][2], "Unexpected text")
                 if ctx.rel:
+                    if not ctx.sect_name:
+                        return SyntaxError(
+                            ctx, linum, cmd[next][2], "Internal: In rsect yet no name"
+                        )
                     ctx.rsects[ctx.sect_name] = ctx.counter
                     ctx.rel = False
                 if ctx.tpl:
@@ -982,34 +1117,45 @@ def asmline(ctx, s, linum, passno):
                 return ("", -1, [])
             if opcode == "tplate":
                 if label != "":
-                    raise SE(ctx, 0, "Label not allowed")
+                    return SyntaxError(ctx, linum, 0, "Label not allowed")
                 if cmd[next][0] != "id":
-                    raise SE(ctx, cmd[next][2], "Name expected")
+                    return SyntaxError(ctx, linum, cmd[next][2], "Name expected")
                 if ctx.rel:
+                    if not ctx.sect_name:
+                        return SyntaxError(
+                            ctx, linum, cmd[next][2], "Internal: In rsect yet no name"
+                        )
                     ctx.rsects[ctx.sect_name] = ctx.counter
                 ctx.rel = False
                 if cmd[next][1] in ctx.tpls and passno == 1:
-                    raise SE(ctx, cmd[next][2], "Template already defined")
+                    return SyntaxError(
+                        ctx, linum, cmd[next][2], "Template already defined"
+                    )
                 ctx.counter = 0
                 ctx.tpl = True
-                ctx.tpl_name = cmd[next][1]
+                ctx.tpl_name = str(cmd[next][1])
                 if ctx.tpl_name not in ctx.tpls:
                     ctx.tpls[ctx.tpl_name] = {}
                 ctx.sect_name = None
                 return ("", -1, [])
             if opcode == "rsect":
                 if label != "":
-                    raise SE(ctx, 0, "Label not allowed")
+                    return SyntaxError(ctx, linum, 0, "Label not allowed")
                 if cmd[next][0] != "id":
-                    raise SE(ctx, cmd[next][2], "Name expected")
-                test_end(cmd[next + 1])
+                    return SyntaxError(ctx, linum, cmd[next][2], "Name expected")
+                if cmd[next + 1][0] != "end":
+                    return SyntaxError(ctx, linum, cmd[next + 1][2], "Unexpected text")
                 if ctx.rel:
+                    if not ctx.sect_name:
+                        return SyntaxError(
+                            ctx, linum, cmd[next][2], "Internal: In rsect yet no name"
+                        )
                     ctx.rsects[ctx.sect_name] = ctx.counter
                 ctx.rel = True
                 if ctx.tpl:
                     ctx.tpl = False
                     ctx.tpls[ctx.tpl_name]["_"] = ctx.counter
-                ctx.sect_name = cmd[next][1]
+                ctx.sect_name = str(cmd[next][1])
                 if ctx.sect_name not in ctx.rsects:
                     ctx.rsects[ctx.sect_name] = 0
                     ctx.counter = 0
@@ -1020,15 +1166,20 @@ def asmline(ctx, s, linum, passno):
                     ctx.counter = ctx.rsects[ctx.sect_name]
                 return (label, -1, cmd[next][1])
             if opcode == "ext":
-                test_end(cmd[next])
+                if cmd[next][0] != "end":
+                    return SyntaxError(ctx, linum, cmd[next][2], "Unexpected text")
                 if label not in ctx.exts or label not in ctx.labels[ctx.sect_name]:
                     ctx.exts[label] = []
                     return ("!" + label, 0, cmd[next][1])
                 return ("", 0, [])
             if opcode == "end":
                 if label != "":
-                    raise SE(ctx, 0, "Illegal label")
+                    return SyntaxError(ctx, linum, 0, "Illegal label")
                 if ctx.rel == True:
+                    if not ctx.sect_name:
+                        return SyntaxError(
+                            ctx, linum, cmd[next][2], "Internal: In rsect yet no name"
+                        )
                     ctx.rsects[ctx.sect_name] = ctx.counter
                 if passno == 1:
                     if ctx.tpl:
@@ -1039,15 +1190,12 @@ def asmline(ctx, s, linum, passno):
                 ctx.rel = False
                 return ("$$$", -2, [])
         else:
-            err_line = linum
-            EP("Internal error: " + opcode + " " + str(cat) + str(linum))
-
-    return None
+            return SyntaxError(
+                ctx, linum, 0, "Internal error: {} {}{}".format(opcode, cat, linum)
+            )
 
 
 def asm(ctx, assmtext=None):
-    global err_line
-
     if assmtext != None:
         ctx.text = assmtext
 
@@ -1060,7 +1208,7 @@ def asm(ctx, assmtext=None):
         finished = False
         size = 0
         label = ""
-        code = []
+        code = []  # type: List[Any]
         while True:
             if linind <= len(ctx.text) - 1:
                 s = ctx.text[linind]
@@ -1070,27 +1218,14 @@ def asm(ctx, assmtext=None):
             else:
                 break
 
-            try:
-                # try:
-                (label, size, code) = asmline(ctx, s, linum, passno)
-                # if passno==1: print linum, ":", (label,size,code), s
-            # except TypeError:
-            # if error_msg != "":return
-            except SE as e:
-                if not ctx.macdef:
-                    if e.ind >= 1:
-                        EP(s[0 : e.ind] + s[e.ind :], term=False)
-                        # EP (" "*(e.ind))
-                    elif e.ind != -1:
-                        EP(s, term=False)
-                    err_line = linum
-                    EP("On line " + str(linum) + " ERROR: " + e.msg)
-                    return
+            res = asmline(ctx, s, linum, passno)
+            if isinstance(res, AssemblerError):
+                if not ctx.macdef or not isinstance(res, SyntaxError):
+                    return res
                 else:
                     size = 0
-            except TypeError:
-                err_line = linum
-                return
+            else:
+                (label, size, code) = res
 
             if ctx.macdef and size != -4 and size != -3:  # accumulate macro definition
                 if passno == 1:
@@ -1101,21 +1236,25 @@ def asm(ctx, assmtext=None):
                 continue
             elif size == -2:  # end
                 if ctx.macdef:
-                    EP("ERROR: 'end' encountered while processing macro definition")
-                    quit(-1)
+                    return SyntaxError(
+                        ctx,
+                        linum,
+                        -1,
+                        "ERROR: 'end' encountered while processing macro definition",
+                    )
                 finished = True
                 break
             elif size == -3:  # macro
                 if ctx.macdef:
-                    EP("ERROR: macro definition inside macro")
-                    quit(-1)
+                    return SyntaxError(
+                        ctx, linum, -1, "ERROR: macro definition inside macro"
+                    )
                 ctx.macdef = True
                 mbody = []  # type: List[str]
                 continue
             elif size == -4:  # mend
                 if not ctx.macdef:
-                    EP("ERROR: mend before macro")
-                    quit(-1)
+                    return SyntaxError(ctx, linum, -1, "ERROR: mend before macro")
                 ctx.macdef = False
                 if passno == 1:
                     ctx.macros[ctx.mname + "/" + str(ctx.marity)] = mbody
@@ -1140,38 +1279,44 @@ def asm(ctx, assmtext=None):
             elif size >= 0:  # deal with the label off a true instruction
                 if ctx.tpl and passno == 1:
                     if not ctx.ds_ins and size > 0:
-                        err_line = linum
-                        EP(
-                            "On line "
-                            + str(linum)
-                            + " ERROR: Only dc/ds allowed in templates"
+                        return SyntaxError(
+                            ctx,
+                            linum,
+                            -1,
+                            "On line {} ERROR: Only dc/ds allowed in templates".format(
+                                linum
+                            ),
                         )
                     ctx.ds_ins = False
                 if label != "" and passno == 1:
                     if not ready:
-                        err_line = linum
-                        EP(
-                            "On line "
-                            + str(linum)
-                            + " ERROR: 'asect' or 'rsect' expected"
+                        return SyntaxError(
+                            ctx,
+                            linum,
+                            -1,
+                            "On line {} ERROR: 'asect' or 'rsect' expected".format(
+                                linum
+                            ),
                         )
                     addr = ctx.counter
                     if ctx.tpl:
                         if label[0] == ">":
-                            err_line = linum
-                            EP(
-                                "On line "
-                                + str(linum)
-                                + " ERROR: exts in template not allowed"
+                            return SyntaxError(
+                                ctx,
+                                linum,
+                                -1,
+                                "On line {} ERROR: exts in template not allowed".format(
+                                    linum
+                                ),
                             )
                         if label in ctx.tpls[ctx.tpl_name]:
-                            err_line = linum
-                            EP(
-                                "On line "
-                                + str(linum)
-                                + " ERROR: Label '"
-                                + label
-                                + "' already defined"
+                            return SyntaxError(
+                                ctx,
+                                linum,
+                                -1,
+                                "On line {} ERROR: Label ‘{}’ already defined".format(
+                                    linum, label
+                                ),
                             )
                         ctx.tpls[ctx.tpl_name][label] = ctx.counter
                     if label[0] == ">":
@@ -1179,24 +1324,24 @@ def asm(ctx, assmtext=None):
                         ctx.ents[ctx.sect_name][label] = ctx.counter
                     if label[0] == "!":
                         if label[1] == ">":
-                            err_line = linum
-                            EP(
-                                "On line "
-                                + str(linum)
-                                + " ERROR: label "
-                                + label[2:]
-                                + " both ext and entry"
+                            return SyntaxError(
+                                ctx,
+                                linum,
+                                -1,
+                                "On line {} ERROR: Label ‘{}’ both ext and entry".format(
+                                    linum, label[2:]
+                                ),
                             )
                         label = label[1:]
                         addr = 0
                     if not ctx.tpl and label in ctx.labels[ctx.sect_name]:
-                        err_line = linum
-                        EP(
-                            "On line "
-                            + str(linum)
-                            + " ERROR: label "
-                            + label
-                            + " already defined"
+                        return SyntaxError(
+                            ctx,
+                            linum,
+                            -1,
+                            "On line {} ERROR: Label ‘{}’ already defined".format(
+                                linum, label
+                            ),
                         )
                     if not ctx.tpl:
                         ctx.labels[ctx.sect_name][label] = addr
@@ -1205,8 +1350,12 @@ def asm(ctx, assmtext=None):
 
             if passno == 2 and size > 0 and not ctx.tpl:
                 if not ready:
-                    err_line = linum
-                    EP("On line " + str(linum) + " ERROR: 'asect' or 'rsect' expected")
+                    return SyntaxError(
+                        ctx,
+                        linum,
+                        -1,
+                        "On line {} ERROR: 'asect' or 'rsect' expected".format(linum),
+                    )
                 output += [(linind, ctx.counter, code, ctx.sect_name)]
             if passno == 2 and ctx.tpl:
                 output += [
@@ -1215,7 +1364,7 @@ def asm(ctx, assmtext=None):
             if size > 0:
                 ctx.counter += size
         if not finished:
-            EP("ERROR: file ends before end of program")
+            return SyntaxError(ctx, linum, 0, "ERROR: file ends before end of program")
     return output
 
 
@@ -1486,7 +1635,7 @@ def genoc(ctx, output, objbuff=None):
     for extn in ctx.exts:
         strg = "XTRN " + extn + ":"
         if ctx.exts[extn] == []:
-            EP("WARNING: ext '" + extn + "' declared, not used")
+            print("WARNING: ext '" + extn + "' declared, not used")
         for pair in ctx.exts[extn]:
             (s, offset) = pair
             strg += " " + s + " " + shex(offset)
@@ -1502,15 +1651,15 @@ def genoc(ctx, output, objbuff=None):
     return
 
 
-def takemdefs(ctx, objfile, filename):
+def takemdefs(
+    ctx, objfile, filename
+):  # type: (Context, IO, str) -> Optional[AssemblerError]
     def formerr():
-        EP(
-            "Error in macro library file '"
-            + filename
-            + "' On line "
-            + str(ln)
-            + ":\n"
-            + l
+        return MacroError(
+            ctx,
+            ln,
+            -1,
+            "Error in macro library file ‘{}’ On line {}:\n{}".format(filename, ln, l),
         )
 
     name = ""
@@ -1533,9 +1682,9 @@ def takemdefs(ctx, objfile, filename):
                 state = 0
         if state == 0:
             if not l[0] == "*":
-                formerr()
+                return formerr()
             if not l[1].isalpha():
-                formerr()
+                return formerr()
             k = 2
             found = False
             while k <= len(l) - 1:
@@ -1544,13 +1693,13 @@ def takemdefs(ctx, objfile, filename):
                     break
                 k += 1
             if not found:
-                formerr()
+                return formerr()
             if l[k] != "/":
-                formerr()
+                return formerr()
             opcode = l[1:k]
             k += 1
             if k > len(l) or not l[k].isdigit():
-                formerr()
+                return formerr()
             name = l[1 : k + 1]
             body = []
             state = 1
@@ -1559,44 +1708,37 @@ def takemdefs(ctx, objfile, filename):
 
 
 ###################### M A C R O  FACILITIES
-#
 
 
-def EP(s, term=True):
-    global ret_error, error_msg
-    # print("**", retError)
-    if ret_error:
-        error_msg = s
-        # if error_msg !="":
-        #    error_msg = error_msg + "\n"+s
-    else:
-        sys.stderr.write(s + "\n")
-        if term:
-            quit(-1)
-    # print(error_msg)#debug
-
-
-def mxpand(ctx, s, pos, pno):
+def mxpand(
+    ctx, line, s, pos, pno
+):  # type: (Context, int, str, int, int) -> Union[str, AssemblerError]
     # substitute factual pars for $1...$<pno> in s escaping quoted strings
     # substitute a nonce for ' and strings for ?<id> from mvars
 
     if s == "":
         return ""
     if len(s) == 1 and s == "$":
-        raise SE(ctx, pos, "Missing parameter number")
+        return SyntaxError(ctx, line, pos, "Missing parameter number")
     x = s[0]
 
     if x == "$":
         if not s[1].isdigit:
-            raise SE(ctx, pos, "Illegal parameter number")
+            return SyntaxError(ctx, line, pos, "Illegal parameter number")
         n = int(s[1])
         if n > pno:
-            raise SE(ctx, pos, "Parameter number too high")
+            return SyntaxError(ctx, line, pos, "Parameter number too high")
         k = len(ctx.pars[n - 1])
-        return ctx.pars[n - 1] + mxpand(ctx, s[2:], pos + k - 2, pno)
+        res = mxpand(ctx, line, s[2:], pos + k - 2, pno)
+        if isinstance(res, AssemblerError):
+            return res
+        return ctx.pars[n - 1] + res
 
     if x == "?":
-        return mxpand(ctx, "!" + mxpand(ctx, s[1:], pos + 1, pno), pos, pno)
+        res = mxpand(ctx, line, s[1:], pos + 1, pno)
+        if isinstance(res, AssemblerError):
+            return res
+        return mxpand(ctx, line, "!" + res, pos, pno)
     if x == "!":
         k = 1
         w = ""
@@ -1611,14 +1753,20 @@ def mxpand(ctx, s, pos, pno):
                 ofc = ""
             else:
                 ofc = s[1]
-            raise SE(ctx, pos, "Illegal macro-variable '" + ofc + "'")
+            return SyntaxError(ctx, line, pos, "Illegal macro-variable '" + ofc + "'")
         if w not in ctx.mvars:
-            raise SE(ctx, pos, "Unassigned macro-variable: " + w)
-        return ctx.mvars[w] + mxpand(ctx, s[k:], pos + len(ctx.mvars[w]), pno)
+            return SyntaxError(ctx, line, pos, "Unassigned macro-variable: " + w)
+        res = mxpand(ctx, line, s[k:], pos + len(ctx.mvars[w]), pno)
+        if isinstance(res, AssemblerError):
+            return res
+        return ctx.mvars[w] + res
 
     if x == "'":
         smcount = str(ctx.mcount)
-        return smcount + mxpand(ctx, s[1:], pos + len(smcount), pno)
+        res = mxpand(ctx, line, s[1:], pos + len(smcount), pno)
+        if isinstance(res, AssemblerError):
+            return res
+        return smcount + res
     if x == '"':
         k = 1
         esc = False
@@ -1631,14 +1779,20 @@ def mxpand(ctx, s, pos, pno):
                 continue
             v = s[k]
             if v == '"':
-                return s[: k + 1] + mxpand(ctx, s[k + 1 :], pos + k + 1, pno)
+                res = mxpand(ctx, line, s[k + 1 :], pos + k + 1, pno)
+                if isinstance(res, AssemblerError):
+                    return res
+                return s[: k + 1] + res
             k += 1
         return s
     else:
-        return x + mxpand(ctx, s[1:], pos + 1, pno)
+        res = mxpand(ctx, line, s[1:], pos + 1, pno)
+        if isinstance(res, AssemblerError):
+            return res
+        return x + res
 
 
-def unptoken(ctx, t):
+def unptoken(ctx, line, t):
     if t[0] == "id":
         return t[1]
     if t[0] == "reg":
@@ -1647,10 +1801,12 @@ def unptoken(ctx, t):
         return "0x" + format(t[1] + 256, "02x")[-2:]
     if t[0] == "str":
         return '"' + (t[1].replace("\\", "\\\\")).replace('"', '\\"') + '"'
-    raise SE(ctx, t[2], "Illegal item")
+    return SyntaxError(ctx, line, t[2], "Illegal item")
 
 
-def commasep(ctx, tokens):
+def commasep(
+    ctx, line, tokens
+):  # type: (Context, int, list) -> Union[AssemblerError, List[str]]
     k = 0
     result = []  # type: List[str]
     while k <= len(tokens) - 1:
@@ -1664,44 +1820,25 @@ def commasep(ctx, tokens):
                 and tokens[k + 2][0] == "id"
             ):  # template field
                 result += [
-                    unptoken(ctx, tokens[k]) + "." + unptoken(ctx, tokens[k + 2])
+                    unptoken(ctx, line, tokens[k])
+                    + "."
+                    + unptoken(ctx, line, tokens[k + 2])
                 ]
                 k = k + 2
             else:
-                result += [unptoken(ctx, tokens[k])]
+                result += [unptoken(ctx, line, tokens[k])]
         k = k + 1
         if k <= len(tokens) - 1 and tokens[k][0] != "," and tokens[k][0] != "end":
-            raise SE(ctx, tokens[k][2], "Comma expected here")
+            return SyntaxError(ctx, line, tokens[k][2], "Comma expected here")
         else:
             k = k + 1
     return result
 
 
-def ismstack(ctx, l, s):
-    global err_line, error_msg
-
-    def diag(pos, msg, brief=False):
-        global err_line
-
-        if brief:
-            err_line = l
-            prefix = "On line " + str(l) + " ERROR: "
-        else:
-            err_line = l
-            prefix = (
-                "On line "
-                + str(l)
-                + " ERROR: Macro \nExpanding:\n"
-                + s
-                + "\n"
-                + (" " * pos)
-                + "^\n"
-            )
-        EP(prefix + msg)
-
+def ismstack(ctx, l, s):  # type: (Context, int, str) -> Union[AssemblerError, bool]
     tokens = lexline(ctx, l, s)
-    if error_msg != "":
-        return False
+    if isinstance(tokens, AssemblerError):
+        return tokens
 
     mstackind = 0
 
@@ -1714,7 +1851,9 @@ def ismstack(ctx, l, s):
                         mstpos = tokens[1][2]
                     else:
                         mstpos = 0
-                    diag(mstpos, "Macro stack index too high: " + str(mstackind))
+                    return MacroError(
+                        ctx, l, mstpos, "Macro stack index too high: " + str(mstackind)
+                    )
                 tokens = tokens[1:]
 
         if len(tokens) == 0:
@@ -1722,16 +1861,18 @@ def ismstack(ctx, l, s):
 
         if len(tokens) == 1:
             if tokens[0][0] == "id" and (tokens[0][1] in ["mpush", "mread", "mpop"]):
-                diag(0, "Macro stack operation without argument")
+                return MacroError(ctx, l, 0, "Macro stack operation without argument")
             else:
                 return False
 
         if len(tokens) >= 3 and tokens[0][0] == "id" and tokens[1][0] == ":":
             if tokens[2][0] == "id" and (tokens[2][1] in ["mpush", "mread", "mpop"]):
-                diag(0, "Macro directives must not be labelled")
+                return MacroError(ctx, l, 0, "Macro directives must not be labelled")
 
         if tokens[0][0] == "id" and tokens[0][1] == "mpush":
-            frames = commasep(ctx, tokens[1:])
+            frames = commasep(ctx, l, tokens[1:])
+            if isinstance(frames, AssemblerError):
+                return frames
             ctx.mstack[mstackind] = frames[::-1] + ctx.mstack[mstackind]
             return True
 
@@ -1743,7 +1884,7 @@ def ismstack(ctx, l, s):
             while k < len(tokens):
                 if tokens[k][0] == "id":
                     if len(ctx.mstack[mstackind]) < stoff + 1:
-                        diag(tokens[k][2], diagmes, brief)
+                        return MacroError(ctx, l, tokens[k][2], diagmes, brief)
                     if tokens[0][1] == "mpop":
                         ctx.mvars[str(tokens[k][1])] = ctx.mstack[mstackind][0]
                         ctx.mstack[mstackind] = ctx.mstack[mstackind][1:]
@@ -1756,13 +1897,15 @@ def ismstack(ctx, l, s):
                     brief = True
                     diagmes = str(tokens[k][1])
                 else:
-                    diag(
+                    return MacroError(
+                        ctx,
+                        l,
                         tokens[k][2],
                         "Macro variable or diagnostic message expected here",
                     )
                 k += 1
                 if k <= len(tokens) - 1 and tokens[k][0] != ",":
-                    diag(tokens[k][2], "Comma expected here")
+                    return MacroError(ctx, l, tokens[k][2], "Comma expected here")
                 else:
                     k += 1
             return True
@@ -1782,19 +1925,25 @@ def ismstack(ctx, l, s):
                     if regfree[int(tokens[k][1])]:
                         regfree[int(tokens[k][1])] = False
                     else:
-                        diag(
+                        return MacroError(
+                            ctx,
+                            l,
                             tokens[k][2],
                             "r" + str(tokens[k][1]) + " occurs more than once",
                         )
                 else:
-                    diag(tokens[k][2], "Macro variable or register expected here")
+                    return MacroError(
+                        ctx, l, tokens[k][2], "Macro variable or register expected here"
+                    )
                 k = k + 1
                 if k <= len(tokens) - 1 and tokens[k][0] != ",":
-                    diag(tokens[k][2], "Comma expected here")
+                    return MacroError(ctx, l, tokens[k][2], "Comma expected here")
                 else:
                     k = k + 1
             if howmany > 4:
-                diag(tokens[0][2], "More than 4 operands specified")
+                return MacroError(
+                    ctx, l, tokens[0][2], "More than 4 operands specified"
+                )
             for v in regmvars:
                 ctx.mvars[v] = ""
             for v in regmvars:
@@ -1802,9 +1951,11 @@ def ismstack(ctx, l, s):
                     if regfree[k]:
                         regfree[k] = False
                         if ctx.mvars[v] != "":
-                            diag(
+                            return MacroError(
+                                ctx,
+                                l,
                                 tokens[0][2],
-                                "macro var " + v + " occurs more than once",
+                                "macro var ‘{}’ occurs more than once".format(v),
                             )
                         else:
                             ctx.mvars[v] = "r" + str(k)
@@ -1812,7 +1963,7 @@ def ismstack(ctx, l, s):
             return True
 
     except:
-        diag(int(tokens[k][1]), "Macro error!", brief=True)
+        return MacroError(ctx, l, int(tokens[k][1]), "Macro error!", True)
 
     return False
 
@@ -1823,19 +1974,19 @@ def ismstack(ctx, l, s):
 def compile_asm(codetext=None, cdm8ver=4, ctx=None):
     """Entry point when imported as a library"""
 
-    global ret_error, err_line, error_msg
+    global err_line
 
     # Init all the global vars
 
-    ret_error = True
     err_line = None
-    error_msg = ""
 
     ctx = ctx or Context(cdm8ver)
 
     for line in codetext:
         line = line.rstrip()
         ctx.text += [line.expandtabs()]
+
+    ctx.raw_text = ctx.text.copy()
 
     mlb_name = "standard.mlb"
     mlb_path = os.path.join(sys.path[0], mlb_name)
@@ -1852,31 +2003,29 @@ def compile_asm(codetext=None, cdm8ver=4, ctx=None):
             mlibfile = open(mlb_name, "r")
         except IOError:
             skipfile = True
-            EP("WARNING: no " + mlb_name + " found")
+            print("WARNING: no " + mlb_name + " found")
     if not skipfile:
-        takemdefs(ctx, mlibfile, mlb_name)  # "standard.mlb")
+        res = takemdefs(ctx, mlibfile, mlb_name)
+        if isinstance(res, AssemblerError):
+            err_line = res.line
+            return None, None, res.message
         mlibfile.close()
-    # print("compiling")
-
-    # print(ctx.text)
-    if error_msg != "":
-        # print("result", error_msg) #debug
-        return None, None, error_msg
 
     result = asm(ctx)
-    if error_msg != "":
-        # print("result", error_msg) #debug
-        return None, None, error_msg
-    objstr = ""
-    objstr = genoc(ctx, result, objstr)
-    if error_msg != "":
-        # print("objstr", error_msg)#debug
-        return None, None, error_msg
+    if isinstance(result, AssemblerError):
+        err_line = result.line
+        return None, None, result.message
+
+    objstr = genoc(ctx, result, "")
+    if isinstance(objstr, AssemblerError):
+        err_line = objstr.line
+        return None, None, objstr.message
+
     codelist = pretty_print(ctx, result, ctx.text, False)
     return objstr, codelist, None
 
 
-def main():
+def main():  # type: () -> None
     parser = argparse.ArgumentParser(description="CdM-8 Assembler v1.0")
     parser.add_argument("filename", nargs="?", type=str, help="source_file[.asm]")
     parser.add_argument(
@@ -1910,10 +2059,9 @@ def main():
     if not filename:
         # Fire up GUI!
         args.lst = True
-        # args.sym=True
         root = tk.Tk()
         root.withdraw()
-        cocasGUI = CocAs(master=root, exitroot=True)
+        cocasGUI = CocAs(master=root)
         root.mainloop()
     else:
         ctx = Context()
@@ -1924,10 +2072,13 @@ def main():
         try:
             asmfile = open(filename + ".asm", "r")
         except IOError:
-            EP(filename + ".asm: file not found")
+            print(filename + ".asm: file not found")
+            exit(-1)
         for line in asmfile:
             line = line.rstrip()
             ctx.text += [line.expandtabs()]
+
+        ctx.raw_text = ctx.text.copy()
 
         # Test SE (Exceoption)
         # raise SE(ctx, 2,"MIcks MEssage")
@@ -1947,10 +2098,13 @@ def main():
                 mlibfile = open(mlb_name, "r")
             except IOError:
                 skipfile = True
-                EP("WARNING: no " + mlb_name + " found")
+                print("WARNING: no " + mlb_name + " found")
 
         if not skipfile:
-            takemdefs(ctx, mlibfile, "standard.mlb")
+            res = takemdefs(ctx, mlibfile, "standard.mlb")
+            if isinstance(res, AssemblerError):
+                res.dump()
+                exit(-1)
             mlibfile.close()
 
         if args.mlibs != None:
@@ -1960,11 +2114,19 @@ def main():
                 try:
                     mlibfile = open(x + ".mlb", "r")
                 except IOError:
-                    EP(x + ".mlb not found")
-                takemdefs(ctx, mlibfile, x)
+                    print(x + ".mlb not found")
+                    exit(-1)
+                res = takemdefs(ctx, mlibfile, x)
+                if isinstance(res, AssemblerError):
+                    res.dump()
+                    exit(-1)
                 mlibfile.close()
 
         result = asm(ctx)
+        if isinstance(result, AssemblerError):
+            result.dump()
+            exit(-1)
+
         genoc(ctx, result)
 
         if args.lstx:
