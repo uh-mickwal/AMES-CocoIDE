@@ -293,9 +293,9 @@ class CocAs(tk.Tk):
             if self.asmfile[-4:] == ".asm":
                 filename = self.asmfile[:-4]
                 try:
-                    fileBuff = open(filename + ".asm", "r")
+                    fileBuff = open("{}.asm".format(filename), "r")
                 except IOError:
-                    error_msg = filename + ".asm: file not found"
+                    error_msg = "{}.asm: file not found".format(filename)
         if not error_msg:
             try:
                 ctx.filename = filename
@@ -309,7 +309,7 @@ class CocAs(tk.Tk):
         else:
             self.statusText.insert(
                 tk.END,
-                "\n\nASSEMBLED OK! Written to:\n " + self.asmfile[:-4] + ".obj\n",
+                "\n\nASSEMBLED OK! Written to:\n {}.obj\n".format(self.asmfile[:-4]),
             )
             self.statusText.insert(tk.END, "\nASSEMBLER REPORT LISTING:\n" + codelist)
             self.statusText.insert(tk.END, "\nOBJECT CODE:\n")
@@ -319,7 +319,7 @@ class CocAs(tk.Tk):
         # Save obj file
         # print("Saving obj file")
         try:
-            with io.open(filename + ".obj", "w", encoding="utf8") as f:
+            with io.open("{}.obj".format(filename), "w", encoding="utf8") as f:
                 f.write(obj_code)
             print()
         except TypeError:
@@ -332,7 +332,7 @@ class CocAs(tk.Tk):
         if error_msg:
             self.statusText.insert(tk.END, error_msg)
         else:
-            self.statusText.insert(tk.END, "\nSaved OBJ:\n " + filename + ".obj OK")
+            self.statusText.insert(tk.END, "\nSaved OBJ:\n {}.obj OK".format(filename))
         self.statusText.see(tk.END)
 
     def closeCocas(self):
@@ -613,7 +613,9 @@ def asmline(
             else:
                 if opsynt[1] == ":":
                     return SyntaxError(ctx, linum, -1, lst[2][1])
-                return SyntaxError(ctx, linum, lst[0][2], "Label " + lbl + " not found")
+                return SyntaxError(
+                    ctx, linum, lst[0][2], "Label {} not found".format(lbl)
+                )
             if opsynt[1] == "end" or opsynt[1] == ":":
                 if onlyabs and gotrel:
                     return SyntaxError(
@@ -635,7 +637,7 @@ def asmline(
                         ctx,
                         linum,
                         lst[2][2],
-                        "External label " + lbl2 + " can't be used as displacement",
+                        "External label {} can't be used as displacement".format(lbl2),
                     )
                 if ctx.sect_name and lbl2 in ctx.labels[ctx.sect_name] or lbl2 == "*":
                     Value2 = (
@@ -672,7 +674,7 @@ def asmline(
                     Value2 = ctx.abses[lbl2]
                     return (((Value + sign * Value2) + 256) % 256, gotrel)
                 return SyntaxError(
-                    ctx, linum, lst[2][2], "Label " + lbl2 + " not found"
+                    ctx, linum, lst[2][2], "Label {} not found".format(lbl2)
                 )
 
             ########################################
@@ -896,7 +898,7 @@ def asmline(
                     ctx,
                     linum,
                     cmd[mynext][2],
-                    "Unknown template '" + str(cmd[mynext][1]) + "'",
+                    "Unknown template '{}'".format(cmd[mynext][1]),
                 )
             if cmd[mynext + 3][0] != "end":
                 return SyntaxError(ctx, linum, cmd[mynext + 3][2], "Unexpected text")
@@ -920,7 +922,7 @@ def asmline(
                             ctx,
                             linum,
                             cmd[next][2],
-                            "Opcode '" + ctx.mname + "' reserved by assembler",
+                            "Opcode '{}' reserved by assembler".format(ctx.mname),
                         )
                 if cmd[next + 1][0] != "/":
                     return SyntaxError(ctx, linum, cmd[next + 1][2], "/ expected")
@@ -945,15 +947,14 @@ def asmline(
                 return sep_res
             ctx.pars = sep_res
             parno = len(ctx.pars)
-            if opcode + "/" + str(parno) not in ctx.macros:
+            if "{}/{}".format(opcode, parno) not in ctx.macros:
                 return SyntaxError(
                     ctx,
                     linum,
                     cmd[next][2],
-                    "Number of params ("
-                    + str(parno)
-                    + ")does not match definition of macro "
-                    + opcode,
+                    "Number of params ({})does not match definition of macro {}".format(
+                        parno, opcode
+                    ),
                 )
 
             if label == "":
@@ -964,29 +965,29 @@ def asmline(
                 ll = [label + ":"]
 
             mbody = (
-                ["# >>>>>>"] + ll + ctx.macros[opcode + "/" + str(parno)] + ["# <<<<<<"]
+                ["# >>>>>>"]
+                + ll
+                + ctx.macros["{}/{}".format(opcode, parno)]
+                + ["# <<<<<<"]
             )
             newbody = []
             for s1 in mbody:
                 if ctx.dbg:
                     print(
-                        "before => "
-                        + s1
-                        + " ******* pars= "
-                        + str(ctx.pars)
-                        + "mvars="
-                        + str(ctx.mvars)
+                        "before => {} ******* pars= {}mvars={}".format(
+                            s1, ctx.pars, ctx.mvars
+                        )
                     )
                 rslt = mxpand(ctx, linum, s1, 0, parno)
                 if isinstance(rslt, AssemblerError):
                     return rslt
                 if ctx.dbg:
-                    print("after  => " + str(rslt))
+                    print("after  => {}".format(rslt))
                 m_res = ismstack(ctx, linum, rslt)
                 if isinstance(m_res, AssemblerError):
                     return m_res
                 if not m_res:
-                    newbody += [rslt + "#" + chr(1)]
+                    newbody += ["{}#{}".format(rslt, chr(1))]
             ctx.mcount += 1
             return ("", -5, newbody)
         ################################################## END OF MACRO FACILITIES
@@ -1017,7 +1018,7 @@ def asmline(
                 alias = str(cmd[next][1])
                 if alias in ctx.abses:
                     return SyntaxError(
-                        ctx, linum, cmd[next + 1][2], alias + " already defined"
+                        ctx, linum, cmd[next + 1][2], "{} already defined".format(alias)
                     )
                 ctx.abses[alias] = Value
                 return (label, -10, [Value])
@@ -1257,7 +1258,7 @@ def asm(ctx, assmtext=None):
                     return SyntaxError(ctx, linum, -1, "ERROR: mend before macro")
                 ctx.macdef = False
                 if passno == 1:
-                    ctx.macros[ctx.mname + "/" + str(ctx.marity)] = mbody
+                    ctx.macros["{}/{}".format(ctx.mname, ctx.marity)] = mbody
                     iset[ctx.mname] = (0, mi)
                 continue
 
@@ -1388,15 +1389,12 @@ def pretty_print(ctx, obj1, src, prtOP=True):
 
     if prtOP == True:
         print(
-            "\nCdM-8 Assembler v"
-            + ASM_VER
-            + " <<<"
-            + ctx.filename
-            + ".asm>>> "
-            + time.strftime("%d/%m/%Y")
-            + " "
-            + time.strftime("%H:%M:%S")
-            + "\n"
+            "\nCdM-8 Assembler v{} <<<{}.asm>>> {} {}\n".format(
+                ASM_VER,
+                ctx.filename,
+                time.strftime("%d/%m/%Y"),
+                time.strftime("%H:%M:%S"),
+            )
         )
     else:
         # return code listing via function return (to cocoide)
@@ -1444,10 +1442,10 @@ def pretty_print(ctx, obj1, src, prtOP=True):
             ):  # macro produced no code
                 if prtOP == True:
                     print(
-                        " " * offset + " " + format(ln, "3d") + "  " + s
+                        "{} {:3d}  {}".format(" " * offset, ln, s)
                     )  # just print the mi
                 else:
-                    retlist += " " * offset + " " + format(ln, "3d") + s + "\n"
+                    retlist += "{} {:3d}{}\n".format(" " * offset, ln, s)
 
                 continue
             else:
@@ -1464,18 +1462,13 @@ def pretty_print(ctx, obj1, src, prtOP=True):
                     else:
                         if prtOP == True:
                             print(
-                                ("<scattered>" + " " * offset)[0:offset]
-                                + " "
-                                + format(ln, "3d")
-                                + "  "
-                                + s
+                                "{} {:3d}  {}".format(
+                                    ("<scattered>" + " " * offset)[0:offset], ln, s
+                                )
                             )
                         else:
-                            retlist += (
-                                ("<scattered>" + " " * offset)[0:offset]
-                                + " "
-                                + format(ln, "3d")
-                                + "\n"
+                            retlist += "{} {:3d}\n".format(
+                                ("<scattered>" + " " * offset)[0:offset], ln
                             )
                         frag = True
                         break
@@ -1491,9 +1484,9 @@ def pretty_print(ctx, obj1, src, prtOP=True):
 
         if obj == [] or obj[0][0] != lnind + 1:
             if prtOP == True:
-                print(" " * offset + " " + format(ln, "3d") + "  " + s)
+                print("{} {:3d}  {}".format(" " * offset, ln, s))
             else:
-                retlist += " " * offset + " " + format(ln, "3d") + "  " + s + "\n"
+                retlist += "{} {:3d}  {}\n".format(" " * offset, ln, s)
         else:
             addr = obj[0][1]
             clist = obj[0][2]
@@ -1504,32 +1497,25 @@ def pretty_print(ctx, obj1, src, prtOP=True):
             if secname == "":  # template
                 if prtOP == True:
                     print(
-                        (format(addr, "02x") + ": " + " " * offset)[0:offset]
-                        + " "
-                        + format(ln1, "3d")
-                        + "  "
-                        + s
+                        "{} {:3d}  {}".format(
+                            "{:02x}: {}".format(addr, " " * offset)[0:offset], ln1, s
+                        )
                     )
                 else:
-                    retlist += (
-                        (format(addr, "02x") + ": " + " " * offset)[0:offset]
-                        + " "
-                        + format(ln1, "3d")
-                        + "  "
-                        + s
-                        + "\n"
+                    retlist += "{} {:3d}  {}\n".format(
+                        "{:02x}: {}".format(addr, " " * offset)[0:offset], ln1, s
                     )
             while clist != []:
-                pstr = format(addr, "02x") + ": " + (" ".join(map(shex, clist[0:4])))
+                pstr = "{:02x}: {}".format(addr, " ".join(map(shex, clist[0:4])))
                 ppr = (pstr + " " * offset)[0:offset]
                 if ln1 > 0:
                     sln = format(ln1, "3d")
                 else:
                     sln = " "
                 if prtOP == True:
-                    print(ppr + " " + sln + "  " + tstr)
+                    print("{} {}  {}".format(ppr, sln, tstr))
                 else:
-                    retlist += ppr + " " + sln + "  " + tstr + "\n"
+                    retlist += "{} {}  {}\n".format(ppr, sln, tstr)
                 if len(clist) <= 4:
                     break
                 addr += 4
@@ -1545,26 +1531,25 @@ def pretty_print(ctx, obj1, src, prtOP=True):
             relsn = ctx.rel_list[name]
             strg = ""
             for r in relsn:
-                strg += format(r, "02x") + " "
-            print(name + "\t" + format(ctx.rsects[name], "02x") + "\t" + strg)
+                strg += "{:02x} ".format(r)
+            print("{}\t{:02x}\n{}".format(name, ctx.rsects[name], strg))
 
         print("\nENTRIES:\nSection\t\tName/Offset\n")
         for name in ctx.ents:
-            strg = name + "\t\t"
+            strg = "{}\t\t".format(name)
             if ctx.ents[name] == {}:
                 strg += "<NONE>"
                 print(strg)
                 continue
             for nm in ctx.ents[name]:
-                strg += nm + ":" + format(ctx.ents[name][nm], "02x") + "\t"
+                strg += "{}:{:02x}\t".format(nm, ctx.ents[name][nm])
             print(strg)
 
         print("\nEXTERNALS:\nName\t\tUsed in\n")
         for name in ctx.exts:
-            strg = name + "\t\t"
-            for pair in ctx.exts[name]:
-                (nm, oset) = pair
-                strg += nm + "+" + format(oset, "02x") + " "
+            strg = "{}\t\t".format(name)
+            for nm, oset in ctx.exts[name]:
+                strg += "{}+{:02x} ".format(nm, oset)
             print(strg)
         print("\n" + 70 * "=")
     else:
@@ -1582,7 +1567,7 @@ def genoc(ctx, output, objbuff=None):
             return [x] + eladj([y] + w)
 
     if objbuff == None:
-        objfile = open(ctx.filename + ".obj", "w")
+        objfile = open("{}.obj".format(ctx.filename), "w")
     else:
         objbuff = ""
     sects = {}  # type: Dict[str, List[str]]
@@ -1603,46 +1588,45 @@ def genoc(ctx, output, objbuff=None):
     for pair in absegs:
         (a, d) = pair
         if objbuff == None:
-            objfile.write(
-                "ABS  " + format(a, "02x") + ": " + " ".join(map(shex, d)) + "\n"
-            )
+            objfile.write("ABS  {:02x}: {}\n".format(a, " ".join(map(shex, d))))
         else:
-            objbuff += "ABS  " + format(a, "02x") + ": " + " ".join(map(shex, d)) + "\n"
+            objbuff += "ABS  {:02x}: {}\n".format(a, " ".join(map(shex, d)))
 
     en = ctx.ents["$abs"]
     for e in en:
         if objbuff == None:
-            objfile.write("NTRY " + e + " " + shex(en[e]) + "\n")
+            objfile.write("NTRY {} {}\n".format(e, shex(en[e])))
         else:
-            objbuff += "NTRY " + e + " " + shex(en[e]) + "\n"
+            objbuff += "NTRY {} {}\n".format(e, shex(en[e]))
 
     for st in sects:
         if objbuff == None:
-            objfile.write("NAME " + st + "\n")
-            objfile.write("DATA " + " ".join(map(shex, sects[st])) + "\n")
-            objfile.write("REL  " + " ".join(map(shex, ctx.rel_list[st])) + "\n")
+            objfile.write("NAME {}\n".format(st))
+            objfile.write("DATA {}\n".format(" ".join(map(shex, sects[st]))))
+            objfile.write("REL  {}\n".format(" ".join(map(shex, ctx.rel_list[st]))))
             en = ctx.ents[st]
             for e in en:
-                objfile.write("NTRY " + e + " " + shex(en[e]) + "\n")
+                objfile.write("NTRY {} {}\n".format(e, shex(en[e])))
         else:
-            objbuff += "NAME " + st + "\n" + "DATA "
-            objbuff += " ".join(map(shex, sects[st])) + "\n"
-            objbuff += "REL  " + " ".join(map(shex, ctx.rel_list[st])) + "\n"
+            objbuff += "NAME {}\nDATA {}\nREL  {}\n".format(
+                st,
+                " ".join(map(shex, sects[st])),
+                " ".join(map(shex, ctx.rel_list[st])),
+            )
             en = ctx.ents[st]
             for e in en:
-                objbuff += "NTRY " + e + " " + shex(en[e]) + "\n"
+                objbuff += "NTRY {} {}\n".format(e, shex(en[e]))
 
     for extn in ctx.exts:
-        strg = "XTRN " + extn + ":"
+        strg = "XTRN {}:".format(extn)
         if ctx.exts[extn] == []:
-            print("WARNING: ext '" + extn + "' declared, not used")
-        for pair in ctx.exts[extn]:
-            (s, offset) = pair
-            strg += " " + s + " " + shex(offset)
+            print("WARNING: ext '{}' declared, not used".format(extn))
+        for s, offset in ctx.exts[extn]:
+            strg += " {} {}".format(s, shex(offset))
         if objbuff == None:
-            objfile.write(strg + "\n")
+            objfile.write("{}\n".format(strg))
         else:
-            objbuff += strg + "\n"
+            objbuff += "{}\n".format(strg)
 
     if objbuff == None:
         objfile.close()
@@ -1753,7 +1737,9 @@ def mxpand(
                 ofc = ""
             else:
                 ofc = s[1]
-            return SyntaxError(ctx, line, pos, "Illegal macro-variable '" + ofc + "'")
+            return SyntaxError(
+                ctx, line, pos, "Illegal macro-variable '{}'".format(ofc)
+            )
         if w not in ctx.mvars:
             return SyntaxError(ctx, line, pos, "Unassigned macro-variable: " + w)
         res = mxpand(ctx, line, s[k:], pos + len(ctx.mvars[w]), pno)
@@ -1820,9 +1806,10 @@ def commasep(
                 and tokens[k + 2][0] == "id"
             ):  # template field
                 result += [
-                    unptoken(ctx, line, tokens[k])
-                    + "."
-                    + unptoken(ctx, line, tokens[k + 2])
+                    "{}.{}".format(
+                        unptoken(ctx, line, tokens[k]),
+                        unptoken(ctx, line, tokens[k + 2]),
+                    )
                 ]
                 k = k + 2
             else:
@@ -1877,7 +1864,7 @@ def ismstack(ctx, l, s):  # type: (Context, int, str) -> Union[AssemblerError, b
             return True
 
         if tokens[0][0] == "id" and (tokens[0][1] == "mpop" or tokens[0][1] == "mread"):
-            diagmes = "Macro stack " + str(mstackind) + " empty or too few frames"
+            diagmes = "Macro stack {} empty or too few frames".format(mstackind)
             k = 1
             stoff = 0
             brief = False
@@ -1929,7 +1916,7 @@ def ismstack(ctx, l, s):  # type: (Context, int, str) -> Union[AssemblerError, b
                             ctx,
                             l,
                             tokens[k][2],
-                            "r" + str(tokens[k][1]) + " occurs more than once",
+                            "r{} occurs more than once".format(tokens[k][1]),
                         )
                 else:
                     return MacroError(
@@ -2003,7 +1990,7 @@ def compile_asm(codetext=None, cdm8ver=4, ctx=None):
             mlibfile = open(mlb_name, "r")
         except IOError:
             skipfile = True
-            print("WARNING: no " + mlb_name + " found")
+            print("WARNING: no {} found".format(mlb_name))
     if not skipfile:
         res = takemdefs(ctx, mlibfile, mlb_name)
         if isinstance(res, AssemblerError):
@@ -2070,18 +2057,15 @@ def main():  # type: () -> None
             filename = filename[:-4]
             ctx.filename = filename
         try:
-            asmfile = open(filename + ".asm", "r")
+            asmfile = open("{}.asm".format(filename), "r")
         except IOError:
-            print(filename + ".asm: file not found")
+            print("{}.asm: file not found".format(filename))
             exit(-1)
         for line in asmfile:
             line = line.rstrip()
             ctx.text += [line.expandtabs()]
 
         ctx.raw_text = ctx.text.copy()
-
-        # Test SE (Exceoption)
-        # raise SE(ctx, 2,"MIcks MEssage")
 
         mlb_name = "standard.mlb"
         mlb_path = os.path.join(sys.path[0], mlb_name)
@@ -2098,7 +2082,7 @@ def main():  # type: () -> None
                 mlibfile = open(mlb_name, "r")
             except IOError:
                 skipfile = True
-                print("WARNING: no " + mlb_name + " found")
+                print("WARNING: no {} found".format(mlb_name))
 
         if not skipfile:
             res = takemdefs(ctx, mlibfile, "standard.mlb")
@@ -2112,9 +2096,9 @@ def main():  # type: () -> None
                 if x[-4:] == ".mlb":
                     x = x[:-4]
                 try:
-                    mlibfile = open(x + ".mlb", "r")
+                    mlibfile = open("{}.mlb".format(x), "r")
                 except IOError:
-                    print(x + ".mlb not found")
+                    print("{}.mlb not found".format(x))
                     exit(-1)
                 res = takemdefs(ctx, mlibfile, x)
                 if isinstance(res, AssemblerError):
