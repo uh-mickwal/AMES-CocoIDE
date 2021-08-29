@@ -1556,7 +1556,9 @@ def pretty_print(ctx, obj1, src, prtOP=True):
         return retlist
 
 
-def genoc(ctx, output, objbuff=None):
+def genoc(
+    ctx, output, objfile=None
+):  # type: (Context, List[Tuple[int, int, List[str], str]], Optional[IO[str]]) -> Optional[str]
     def eladj(absegs):
         if len(absegs) < 2:  # elimenate adjacent segments
             return absegs
@@ -1566,10 +1568,11 @@ def genoc(ctx, output, objbuff=None):
         else:
             return [x] + eladj([y] + w)
 
-    if objbuff == None:
-        objfile = open("{}.obj".format(ctx.filename), "w")
+    if objfile:
+        buff = objfile
     else:
-        objbuff = ""
+        buff = objbuff = io.StringIO()
+
     sects = {}  # type: Dict[str, List[str]]
     absegs = []
     for r in output:
@@ -1585,54 +1588,32 @@ def genoc(ctx, output, objbuff=None):
         else:
             absegs += [(a, d)]
     absegs = eladj(absegs)
-    for pair in absegs:
-        (a, d) = pair
-        if objbuff == None:
-            objfile.write("ABS  {:02x}: {}\n".format(a, " ".join(map(shex, d))))
-        else:
-            objbuff += "ABS  {:02x}: {}\n".format(a, " ".join(map(shex, d)))
+    for a, d in absegs:
+        buff.write("ABS  {:02x}: {}\n".format(a, " ".join(map(shex, d))))
 
     en = ctx.ents["$abs"]
     for e in en:
-        if objbuff == None:
-            objfile.write("NTRY {} {}\n".format(e, shex(en[e])))
-        else:
-            objbuff += "NTRY {} {}\n".format(e, shex(en[e]))
+        buff.write("NTRY {} {}\n".format(e, shex(en[e])))
 
     for st in sects:
-        if objbuff == None:
-            objfile.write("NAME {}\n".format(st))
-            objfile.write("DATA {}\n".format(" ".join(map(shex, sects[st]))))
-            objfile.write("REL  {}\n".format(" ".join(map(shex, ctx.rel_list[st]))))
-            en = ctx.ents[st]
-            for e in en:
-                objfile.write("NTRY {} {}\n".format(e, shex(en[e])))
-        else:
-            objbuff += "NAME {}\nDATA {}\nREL  {}\n".format(
-                st,
-                " ".join(map(shex, sects[st])),
-                " ".join(map(shex, ctx.rel_list[st])),
-            )
-            en = ctx.ents[st]
-            for e in en:
-                objbuff += "NTRY {} {}\n".format(e, shex(en[e]))
+        buff.write("NAME {}\n".format(st))
+        buff.write("DATA {}\n".format(" ".join(map(shex, sects[st]))))
+        buff.write("REL  {}\n".format(" ".join(map(shex, ctx.rel_list[st]))))
+        en = ctx.ents[st]
+        for e in en:
+            buff.write("NTRY {} {}\n".format(e, shex(en[e])))
 
     for extn in ctx.exts:
         strg = "XTRN {}:".format(extn)
         if ctx.exts[extn] == []:
             print("WARNING: ext '{}' declared, not used".format(extn))
-        for s, offset in ctx.exts[extn]:
-            strg += " {} {}".format(s, shex(offset))
-        if objbuff == None:
-            objfile.write("{}\n".format(strg))
-        else:
-            objbuff += "{}\n".format(strg)
+        for n, offset in ctx.exts[extn]:
+            strg += " {} {}".format(n, shex(offset))
+        buff.write("{}\n".format(strg))
 
-    if objbuff == None:
-        objfile.close()
-    else:
-        return objbuff
-    return
+    if not objfile:
+        return objbuff.getvalue()
+    return None
 
 
 def takemdefs(
@@ -1689,6 +1670,8 @@ def takemdefs(
             state = 1
     ctx.macros[name] = body
     iset[opcode] = (0, mi)
+
+    return None
 
 
 ###################### M A C R O  FACILITIES
@@ -2003,7 +1986,7 @@ def compile_asm(codetext=None, cdm8ver=4, ctx=None):
         err_line = result.line
         return None, None, result.message
 
-    objstr = genoc(ctx, result, "")
+    objstr = genoc(ctx, result)
     if isinstance(objstr, AssemblerError):
         err_line = objstr.line
         return None, None, objstr.message
@@ -2111,7 +2094,8 @@ def main():  # type: () -> None
             result.dump()
             exit(-1)
 
-        genoc(ctx, result)
+        with open("{}.obj".format(ctx.filename), "w") as f:
+            genoc(ctx, result, f)
 
         if args.lstx:
             ctx.lst_me = True
