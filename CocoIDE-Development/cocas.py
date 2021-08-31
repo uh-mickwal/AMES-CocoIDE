@@ -11,44 +11,21 @@
 # V2.7: M Walters, Added GUI
 
 
-# Python 2 and 3 compatibility
-from __future__ import absolute_import, division, print_function
-from typing import IO, Any, Optional, Tuple, Union, List, Dict
-
-try:
-    input = raw_input  # type: ignore # Python 3 style input()
-except:
-    pass
-
+import argparse
+import io
+import os
+import sys
+import time
+import tkinter as tk
+from enum import Enum, auto
+from tkinter import filedialog
+from tkinter import scrolledtext as sctx
+from tkinter import ttk
+from typing import IO, Any, Dict, List, Optional, Tuple, Union
 
 ASM_VER = "2.7"
 
-import os, sys
-import time
-import argparse
-import io
-
-try:
-    # Python 3 tk
-    import tkinter as tk
-    from tkinter import ttk
-    from tkinter import filedialog
-    from tkinter import messagebox
-    from tkinter import scrolledtext as sctx
-    import tkinter.font as font
-
-except:
-    # Python 2 tk (runs but not exhaustively tested!)
-    # Ames lib (sendfile.py) not python 2 compatible (urllib)
-    import Tkinter as tk  # type: ignore
-    import ttk  # type: ignore
-    import tkFileDialog as filedialog  # type: ignore
-    import tkMessageBox as messagebox  # type: ignore
-    import ScrolledText as sctx  # type: ignore
-    import tkFont as font  # type: ignore
-
 ###################### C D M 8  A S S E M B L E R  Facilities
-#
 
 
 class Context:
@@ -193,18 +170,15 @@ iset = {
     "mend": (0, mc),
     #
     "end": (0, spec),
-}  # type: Dict[str, Tuple[int, int]]
+}
 
 
 class CocAs(tk.Tk):
-    def __init__(self, master=None):
+    def __init__(self, master=None) -> None:
         self.master = master
         self.mainWin = tk.Toplevel(master=master)
         self.mainWin.lift()
-        # self.mainWin.update()
-        # self.mainWin.wm_attributes("-topmost", False)
-        # self.mainWin.__init__()
-        self.mainWin.resizable(width=False, height=False)  # width=False, height=False)
+        self.mainWin.resizable(width=False, height=False)
         self.mainWin.title("CDM8 Assembler: CocAs GUI")
         if __name__ == "__main__":
             self.mainWin.protocol(
@@ -212,55 +186,41 @@ class CocAs(tk.Tk):
             )  # Only if main module
         self.mainWin.focus()
         ## Create buttonbar, link and status panels
-        buttonBar = tk.Frame(
-            self.mainWin, name="buttonbar", height=35, width=400, border=2, pady=5
-        )  # , bg="red")
+        buttonBar = ttk.Frame(
+            self.mainWin, name="buttonbar", height=35, width=400, border=2
+        )
         buttonBar.pack(side=tk.TOP, fill=tk.X, expand=False)
 
-        linkPanel = tk.Frame(
-            self.mainWin, name="link", border=2, relief="sunken", pady=5
-        )  # , bg="white")
+        linkPanel = ttk.Frame(self.mainWin, name="link", border=2, relief="sunken")
         linkPanel.pack(side=tk.TOP, fill=tk.X, expand=1)
-        self.linkText = tk.Label(linkPanel, text="No file selected", height=2)
+        self.linkText = ttk.Label(linkPanel, text="No file selected")
         self.linkText.pack(expand=1)
         self.linkText.bind("<Key>", lambda e: "break")
 
-        seperator = tk.Frame(self.mainWin, name="sep1", height=35, border=2, pady=5)
+        seperator = ttk.Frame(self.mainWin, name="sep1", height=35, border=2)
         seperator.pack(side=tk.TOP, fill=tk.BOTH, expand=False)
 
-        statusPanel = tk.Frame(
-            self.mainWin, name="status", border=2, relief="sunken", pady=5, bg="white"
-        )
+        statusPanel = ttk.Frame(self.mainWin, name="status", border=2, relief="sunken")
         statusPanel.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         self.statusText = sctx.ScrolledText(statusPanel, height=25, wrap=tk.NONE)
         self.statusText.pack(fill=tk.BOTH, expand=1)
         self.statusText.bind("<Key>", lambda e: "break")
 
-        # self.linkText.config(state=tk.DISABLED)
-
         # buttons
-        addButton = tk.Button(
-            buttonBar, text="Select .asm File", command=self.addFile
-        )  # , height=2)
+        addButton = ttk.Button(buttonBar, text="Select .asm File", command=self.addFile)
         addButton.pack(side=tk.LEFT)
-        # remButton = tk.Button(buttonBar, text="Remove\n OBJ File", command=self.remObjFile)#, height=2)
-        # remButton.pack(side=tk.LEFT)
-        linkButton = tk.Button(
+        linkButton = ttk.Button(
             buttonBar,
             text="Assemble to .obj File",
             command=self.asmFile,
-        )  # , height=2)
+        )
         linkButton.pack(side=tk.LEFT)
-        # linkButton = tk.Button(buttonBar, text="Asse Logisim Image", command=self.linkFiles)#, height=2)
-        # linkButton.pack(side=tk.LEFT)
-        quitButton = tk.Button(
-            buttonBar, text="Quit", command=self.closeCocas
-        )  # , height=2)
+        quitButton = ttk.Button(buttonBar, text="Quit", command=self.closeCocas)
         quitButton.pack(side=tk.LEFT)
 
         self.asmfile = ""
 
-    def addFile(self, event=None):
+    def addFile(self, event=None) -> None:
         # print("add file")
         filepath = None
 
@@ -273,14 +233,10 @@ class CocAs(tk.Tk):
         self.mainWin.lift()
         if filepath:
             self.asmfile = filepath
-            # print(objfiles)
-            # self.linkText.delete(1.0, tk.END)
-            # for filepath in objfiles:
-            # print(filepath)
             self.linkText.config(text=filepath + "\n")
             self.statusText.delete("1.0", tk.END)
 
-    def asmFile(self, event=None):  # type: (Any) -> None
+    def asmFile(self, event=None) -> None:
         error_msg = ""
 
         ctx = Context()
@@ -335,7 +291,7 @@ class CocAs(tk.Tk):
             self.statusText.insert(tk.END, "\nSaved OBJ:\n {}.obj OK".format(filename))
         self.statusText.see(tk.END)
 
-    def closeCocas(self):
+    def closeCocas(self) -> None:
         self.mainWin.destroy()
         if __name__ == "__main__":
             self.master.destroy()  # type: ignore
