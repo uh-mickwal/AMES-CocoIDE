@@ -412,10 +412,57 @@ class MacroError(AssemblerError):
             )
 
 
-def lex(
-    ctx, s, line, col
-):  # type: (Context, str, int, int) -> Union[AssemblerError, List[Any]]
-    def hexbyte(s):  # type: (str) -> int
+class TokenType(Enum):
+    EMPTY = auto()
+    ID = auto()
+    NUM = auto()
+    COLON = auto()
+    COMMA = auto()
+    PLUS = auto()
+    MINUS = auto()
+    GREATER = auto()
+    SOLIDUS = auto()
+    APOSTROPHE = auto()
+    QUESTION = auto()
+    EXCLAMATION = auto()
+    DOT = auto()
+    EQUAL = auto()
+    STR = auto()
+    PAR = auto()  # Macro Parameter
+    REG = auto()
+    END = auto()
+
+
+CHAR_KINDS = {
+    ":": TokenType.COLON,
+    ",": TokenType.COMMA,
+    "+": TokenType.PLUS,
+    "-": TokenType.MINUS,
+    ">": TokenType.GREATER,
+    "/": TokenType.SOLIDUS,
+    "'": TokenType.APOSTROPHE,
+    "?": TokenType.QUESTION,
+    "!": TokenType.EXCLAMATION,
+    ".": TokenType.DOT,
+    "=": TokenType.EQUAL,
+}
+
+
+class Token:
+    kind: TokenType
+    ind: int = -1
+    value: Union[str, int] = 0
+
+    def __init__(
+        self, kind: TokenType, ind: int = -1, value: Union[str, int] = 0
+    ) -> None:
+        self.kind = kind
+        self.ind = ind
+        self.value = value
+
+
+def lex(ctx: Context, s: str, line: int, col: int) -> Union[AssemblerError, Token]:
+    def hexbyte(s: str) -> int:
         w = s
         w = w.lower()
         k = "0123456789abcdef".find(w[0])
@@ -426,65 +473,57 @@ def lex(
 
     ln = len(s)
     if ln == 0:
-        return ["emp", -1, 0]
+        return Token(TokenType.EMPTY)
     i = 0
     while s[i] == " " or s[i] == "\t" or s[i] == "#":
         if i == ln - 1 or s[i] == "#":
-            return ["emp", -1, 0]
+            return Token(TokenType.EMPTY)
         else:
             i = i + 1
     x = s[i]
     if x.isalpha() or x == "_" or x == "*":
-        CAT = "id"
+        kind = TokenType.ID
     elif x.isdigit():
-        CAT = "num"
-    elif x in ":,+->/'?!.=":
-        CAT = x
+        kind = TokenType.NUM
+    elif x in CHAR_KINDS:
+        kind = CHAR_KINDS[x]
     elif x == '"':
-        CAT = "str"
+        kind = TokenType.STR
     elif x == "$":
-        CAT = "par"
+        kind = TokenType.PAR
     else:
         return LexerError(ctx, line, col, "Illegal character ‘{}’".format(x))
 
-    if CAT == "ws":
-        while x == " " or x == "\t":
-            if i == ln - 1:
-                i = -1
-                break
-            i = i + 1
-            x = s[i]
-        return [CAT, i, 0]
-    elif CAT == "id":
-        VAL = ""
+    if kind is TokenType.ID:
+        value = ""
         if x == "*":
-            VAL = x
+            value = x
             i = i + 1
         while x.isalnum() or x == "_":
-            VAL = VAL + x
+            value += x
             if i == ln - 1:
                 i = -1
                 break
             i = i + 1
             x = s[i]
-        if len(VAL) == 1:
-            return [CAT, i, VAL]
-        if (VAL[0] == "r" or VAL[0] == "R") and VAL[1].isdigit():
-            CAT = "reg"
-            reg = int(VAL[1])
+        if len(value) == 1:
+            return Token(kind, i, value)
+        if (value[0] == "r" or value[0] == "R") and value[1].isdigit():
+            kind = TokenType.REG
+            reg = int(value[1])
             if reg > 3:
                 return LexerError(
                     ctx, line, col, "Illegal register number {}".format(reg)
                 )
-            return [CAT, i, reg]
-        return [CAT, i, VAL]
-    elif CAT == "par":
+            return Token(kind, i, reg)
+        return Token(kind, i, value)
+    elif kind is TokenType.PAR:
         if i < ln - 1:
             if not s[i + 1].isdigit():
                 return LexerError(ctx, line, col + 1, "Expect a digit after a $")
-            return [CAT, i + 2, int(s[i + 1])]
+            return Token(kind, i + 2, int(s[i + 1]))
         return LexerError(ctx, line, col + 1, "Expect a digit after a $")
-    elif CAT == "num":
+    elif kind is TokenType.NUM:
         if ln - 1 >= i + 1 and s[i : i + 2] == "0x":
             if ctx.got_minus:
                 return LexerError(ctx, line, col, "Signed hexadecimal not allowed")
@@ -494,9 +533,9 @@ def lex(
             if k < 0:
                 return LexerError(ctx, line, col, "Illegal hexadecimal")
             if ln - 1 > i + 3:
-                return [CAT, i + 4, k]
+                return Token(kind, i + 4, k)
             else:
-                return [CAT, -1, k]
+                return Token(kind, -1, k)
 
         if ln - 1 >= i + 1 and s[i : i + 2] == "0b":
             if ctx.got_minus:
@@ -509,9 +548,9 @@ def lex(
                     return LexerError(ctx, line, col, "Illegal binary")
                 k = k * 2 + int(x)
             if ln - 1 > i + 9:
-                return [CAT, i + 10, k]
+                return Token(kind, i + 10, k)
             else:
-                return [CAT, -1, k]
+                return Token(kind, -1, k)
 
         k = 0
         ctx.got_minus = False
@@ -520,14 +559,14 @@ def lex(
             if i == ln - 1:
                 if k > 255:
                     return LexerError(ctx, line, col, "Decimal out of range")
-                return [CAT, -1, k]
+                return Token(kind, -1, k)
             else:
                 i = i + 1
                 x = s[i]
         if k > 255:
             return LexerError(ctx, line, col, "Decimal out of range")
-        return [CAT, i, k]
-    elif CAT == "str":
+        return Token(kind, i, k)
+    elif kind is TokenType.STR:
         w = ""
         x = ""
         while x != '"':
@@ -548,28 +587,25 @@ def lex(
                 )
             x = s[i]
         if i == ln - 1:
-            return [CAT, -1, w]
+            return Token(kind, -1, w)
         else:
-            return [CAT, i + 1, w]
+            return Token(kind, i + 1, w)
 
     else:
         if ln == 1:
             i = -1
         else:
             i = i + 1
-        if CAT == "-":
+        if kind is TokenType.MINUS:
             ctx.got_minus = True
         else:
             ctx.got_minus = False
-        return [CAT, i, 0]
+        return Token(kind, i, 0)
 
 
-def lexline(
-    ctx, linum, s
-):  # type: (Context, int, str) -> Union[AssemblerError, List[Tuple[str, Union[str,int], int]]]
+def lexline(ctx: Context, linum: int, s: str) -> Union[AssemblerError, List[Token]]:
     ctx.got_minus = False
-    s0 = s
-    r = []  # type: List[Tuple[str, Union[str,int], int]]
+    r: List[Token] = []
     ind = 0
     ptr = 0
     while ind >= 0:
@@ -577,10 +613,12 @@ def lexline(
         if isinstance(res, AssemblerError):
             return res
         else:
-            [cat, ind, val] = res
+            cat = res.kind
+            ind = res.ind
+            val = res.value
 
-        if (cat == "emp" and len(r) == 0) or cat != "emp":
-            r = r + [(cat, val, ptr)]
+        if (cat is TokenType.EMPTY and len(r) == 0) or cat is not TokenType.EMPTY:
+            r += [Token(cat, ptr, val)]
         if ind >= 0:
             ptr += ind
         s = s[ind:]
@@ -588,18 +626,18 @@ def lexline(
 
 
 def asmline(
-    ctx, s, linum, passno
-):  # type: (Context, str, int, int) -> Union[AssemblerError, Tuple[str, int, Any]]
+    ctx: Context, s: str, linum: int, passno: int
+) -> Union[AssemblerError, Tuple[str, int, List[int]]]:
     def parse_exp(
-        lst, onlyabs=False
-    ):  # type: (list, bool) -> Union[Tuple[int, bool], SyntaxError]
+        lst: List[Token], onlyabs: bool = False
+    ) -> Union[Tuple[int, bool], SyntaxError]:
         gotrel = False
         relcontext = ctx.sect_name != "$abs"
-        opsynt = [lst[j][0] for j in range(3)]
-        if opsynt[0:2] == ["num", "end"]:
-            return (lst[0][1], gotrel)
-        if opsynt[0] == "id":
-            lbl = lst[0][1]
+        opsynt = [lst[j].kind for j in range(3)]
+        if opsynt[0:2] == [TokenType.NUM, TokenType.END]:
+            return (int(lst[0].value), gotrel)
+        if opsynt[0] is TokenType.ID:
+            lbl = str(lst[0].value)
             if ctx.sect_name and lbl in ctx.labels[ctx.sect_name]:
                 Value = ctx.labels[ctx.sect_name][lbl]
                 if relcontext and lbl not in ctx.exts:
@@ -611,32 +649,32 @@ def asmline(
                 Value = ctx.counter
                 gotrel = relcontext
             else:
-                if opsynt[1] == ":":
-                    return SyntaxError(ctx, linum, -1, lst[2][1])
+                if opsynt[1] is TokenType.COLON:
+                    return SyntaxError(ctx, linum, -1, str(lst[2].value))
                 return SyntaxError(
-                    ctx, linum, lst[0][2], "Label {} not found".format(lbl)
+                    ctx, linum, lst[0].ind, "Label {} not found".format(lbl)
                 )
-            if opsynt[1] == "end" or opsynt[1] == ":":
+            if opsynt[1] is TokenType.END or opsynt[1] is TokenType.COLON:
                 if onlyabs and gotrel:
                     return SyntaxError(
-                        ctx, linum, lst[0][2], "Only absolute labels allowed here"
+                        ctx, linum, lst[0].ind, "Only absolute labels allowed here"
                     )
                 return (Value, gotrel)
-            if opsynt[1] == "+":
+            if opsynt[1] is TokenType.PLUS:
                 sign = 1
-            elif opsynt[1] == "-":
+            elif opsynt[1] is TokenType.MINUS:
                 sign = -1
             else:
-                return SyntaxError(ctx, linum, lst[1][2], "Only + or - allowed here")
+                return SyntaxError(ctx, linum, lst[1].ind, "Only + or - allowed here")
             # extension for NSU ######################
 
-            if opsynt[2] == "id":
-                lbl2 = lst[2][1]
+            if opsynt[2] is TokenType.ID:
+                lbl2 = str(lst[2].value)
                 if lbl2 in ctx.exts:
                     return SyntaxError(
                         ctx,
                         linum,
-                        lst[2][2],
+                        lst[2].ind,
                         "External label {} can't be used as displacement".format(lbl2),
                     )
                 if ctx.sect_name and lbl2 in ctx.labels[ctx.sect_name] or lbl2 == "*":
@@ -650,7 +688,7 @@ def asmline(
                             return SyntaxError(
                                 ctx,
                                 linum,
-                                lst[2][2],
+                                lst[2].ind,
                                 "Relocatables can only be subtracted",
                             )
                         else:
@@ -659,7 +697,7 @@ def asmline(
                         return SyntaxError(
                             ctx,
                             linum,
-                            lst[0][2],
+                            lst[0].ind,
                             "Only absolute result is acceptable here",
                         )
                     return (((Value + sign * Value2) + 256) % 256, gotrel)
@@ -668,162 +706,163 @@ def asmline(
                         return SyntaxError(
                             ctx,
                             linum,
-                            lst[0][2],
+                            lst[0].ind,
                             "Only absolute result is acceptable here",
                         )
                     Value2 = ctx.abses[lbl2]
                     return (((Value + sign * Value2) + 256) % 256, gotrel)
                 return SyntaxError(
-                    ctx, linum, lst[2][2], "Label {} not found".format(lbl2)
+                    ctx, linum, lst[2].ind, "Label {} not found".format(lbl2)
                 )
 
             ########################################
-            elif opsynt[2] == "num":
+            elif opsynt[2] is TokenType.NUM:
                 if onlyabs and gotrel:
                     return SyntaxError(
-                        ctx, linum, lst[0][2], "Only absolute labels allowed here"
+                        ctx, linum, lst[0].ind, "Only absolute labels allowed here"
                     )
-                return (((Value + sign * lst[2][1]) + 256) % 256, gotrel)
+                return (((Value + sign * int(lst[2].value)) + 256) % 256, gotrel)
             else:
                 return SyntaxError(
-                    ctx, linum, lst[2][2], "Expecting a number or a label here"
+                    ctx, linum, lst[2].ind, "Expecting a number or a label here"
                 )
-        elif opsynt[0:3] == ["-", "num", "end"]:
-            if lst[1][1] > 128:
-                return SyntaxError(ctx, linum, lst[1][2], "Negative out of range")
-            return (((lst[1][1] ^ 0xFF) + 1) % 256, gotrel)
+        elif opsynt[0:3] == [TokenType.MINUS, TokenType.NUM, TokenType.END]:
+            value = int(lst[1].value)
+            if value > 128:
+                return SyntaxError(ctx, linum, lst[1].ind, "Negative out of range")
+            return (((value ^ 0xFF) + 1) % 256, gotrel)
         else:
-            return SyntaxError(ctx, linum, lst[0][2], "Label or number expected")
+            return SyntaxError(ctx, linum, lst[0].ind, "Label or number expected")
 
     lex_res = lexline(ctx, linum, s)
     if isinstance(lex_res, AssemblerError):
         return lex_res
-    cmd = lex_res + [("end", 0, 0)] * 3
-    if cmd[0][0] == "emp":
+    cmd = lex_res + [Token(TokenType.END, 0)] * 3
+    if cmd[0].kind is TokenType.EMPTY:
         return ("", 0, [])
-    if cmd[0][0] != "id":
-        return SyntaxError(ctx, linum, cmd[0][2], "Label or opcode expected")
+    if cmd[0].kind is not TokenType.ID:
+        return SyntaxError(ctx, linum, cmd[0].ind, "Label or opcode expected")
     else:
         next = 1
         label = ""
-        opcode = str(cmd[0][1])
-        pos = cmd[0][2]
-        if cmd[1][0] == ":" or cmd[1][0] == ">":
-            if cmd[2][0] == "id" or cmd[2][0] == "end":
+        opcode = str(cmd[0].value)
+        pos = cmd[0].ind
+        if cmd[1].kind is TokenType.COLON or cmd[1].kind is TokenType.GREATER:
+            if cmd[2].kind is TokenType.ID or cmd[2].kind is TokenType.END:
                 next = 3
-                if cmd[1][0] == ":":
-                    label = str(cmd[0][1])
+                if cmd[1].kind is TokenType.COLON:
+                    label = str(cmd[0].value)
                 else:
-                    label = ">" + str(cmd[0][1])
-                opcode = str(cmd[2][1])
-                pos = cmd[2][2]
-                if cmd[2][0] == "end":
+                    label = ">" + str(cmd[0].value)
+                opcode = str(cmd[2].value)
+                pos = cmd[2].ind
+                if cmd[2].kind is TokenType.END:
                     return (label, 0, [])
             else:
-                return SyntaxError(ctx, linum, cmd[2][2], "Illegal opcode")
+                return SyntaxError(ctx, linum, cmd[2].ind, "Illegal opcode")
         if opcode not in iset:
             return SyntaxError(ctx, linum, pos, "Invalid opcode: " + opcode)
         (bincode, cat) = iset[opcode]
         if cat == bi:
-            if cmd[next][0] != "reg":
-                return SyntaxError(ctx, linum, cmd[next][2], "Register expected")
-            if cmd[next + 1][0] != ",":
-                return SyntaxError(ctx, linum, cmd[next + 1][2], "Comma expected")
-            if cmd[next + 2][0] != "reg":
-                return SyntaxError(ctx, linum, cmd[next + 2][2], "Register expected")
-            if cmd[next + 3][0] != "end":
-                return SyntaxError(ctx, linum, cmd[next + 3][2], "Unexpected text")
-            x = bincode + 4 * int(cmd[next][1]) + int(cmd[next + 2][1])
+            if cmd[next].kind is not TokenType.REG:
+                return SyntaxError(ctx, linum, cmd[next].ind, "Register expected")
+            if cmd[next + 1].kind is not TokenType.COMMA:
+                return SyntaxError(ctx, linum, cmd[next + 1].ind, "Comma expected")
+            if cmd[next + 2].kind is not TokenType.REG:
+                return SyntaxError(ctx, linum, cmd[next + 2].ind, "Register expected")
+            if cmd[next + 3].kind is not TokenType.END:
+                return SyntaxError(ctx, linum, cmd[next + 3].ind, "Unexpected text")
+            x = bincode + 4 * int(cmd[next].value) + int(cmd[next + 2].value)
             return (label, 1, [x])
         if cat == un:
-            # print("*", args.v3)#debug
-            # if opcode in ("ldsp","stsp") and not args.v3: return SyntaxError(ctx, linum, cmd[next][2],"Use option -v3 to compile Mark 3 instructions")
             if opcode in ("ldsa", "addsp", "setsp", "pushall", "popall") and ctx.v3:
                 return SyntaxError(
                     ctx,
                     linum,
-                    cmd[next][2],
+                    cmd[next].ind,
                     "option -v3 forbids use of Mark 4 instructions",
                 )
 
-            if cmd[next][0] != "reg":
-                return SyntaxError(ctx, linum, cmd[next][2], "Register expected")
-            x = bincode + int(cmd[next][1])
+            if cmd[next].kind is not TokenType.REG:
+                return SyntaxError(ctx, linum, cmd[next].ind, "Register expected")
+            x = bincode + int(cmd[next].value)
             if opcode == "ldi" or opcode == "ldsa":
-                if cmd[next + 1][0] != ",":
-                    return SyntaxError(ctx, linum, cmd[next + 1][2], "Comma expected")
+                if cmd[next + 1].kind is not TokenType.COMMA:
+                    return SyntaxError(ctx, linum, cmd[next + 1].ind, "Comma expected")
                 if passno == 1:
                     return (label, 2, [x, 0])
-                elif cmd[next + 2][0] == "str":
-                    strVal = str(cmd[next + 2][1])
+                elif cmd[next + 2].kind is TokenType.STR:
+                    strVal = str(cmd[next + 2].value)
                     if len(strVal) > 1:
                         return SyntaxError(
-                            ctx, linum, cmd[next + 2][2], "Single character expected"
+                            ctx, linum, cmd[next + 2].ind, "Single character expected"
                         )
                     if opcode == "ldsa":
                         return SyntaxError(
                             ctx,
                             linum,
-                            cmd[next + 2][2],
+                            cmd[next + 2].ind,
                             "ldsa requires a number or a template field",
                         )
                     return (label, 2, [x, ord(strVal[0])])
-                elif cmd[next + 3][0] == ".":  # template reference
-                    if cmd[next + 2][0] != "id":
+                elif cmd[next + 3].kind is TokenType.DOT:  # template reference
+                    if cmd[next + 2].kind is not TokenType.ID:
                         return SyntaxError(
-                            ctx, linum, cmd[next + 2][2], "Template name expected"
+                            ctx, linum, cmd[next + 2].ind, "Template name expected"
                         )
-                    if cmd[next + 2][1] not in ctx.tpls:
+                    if cmd[next + 2].value not in ctx.tpls:
                         return SyntaxError(
-                            ctx, linum, cmd[next + 2][2], "Unknown template"
+                            ctx, linum, cmd[next + 2].ind, "Unknown template"
                         )
-                    tn = str(cmd[next + 2][1])
-                    if cmd[next + 4][0] != "id":
+                    tn = str(cmd[next + 2].value)
+                    if cmd[next + 4].kind is not TokenType.ID:
                         return SyntaxError(
-                            ctx, linum, cmd[next + 4][2], "Field name expected"
+                            ctx, linum, cmd[next + 4].ind, "Field name expected"
                         )
-                    if cmd[next + 4][1] not in ctx.tpls[tn]:
+                    if cmd[next + 4].value not in ctx.tpls[tn]:
                         return SyntaxError(
-                            ctx, linum, cmd[next + 4][2], "Unknown field name"
+                            ctx, linum, cmd[next + 4].ind, "Unknown field name"
                         )
-                    if cmd[next + 5][0] != "end":
+                    if cmd[next + 5].kind is not TokenType.END:
                         return SyntaxError(
                             ctx,
                             linum,
-                            cmd[next + 5][2],
+                            cmd[next + 5].ind,
                             "unexpected token after template field",
                         )
-                    y = ctx.tpls[tn][cmd[next + 4][1]]
+                    y = ctx.tpls[tn][str(cmd[next + 4].value)]
                     return (label, 2, [x, y])
                 else:
                     res = parse_exp(cmd[next + 2 : next + 5])
                     if isinstance(res, AssemblerError):
                         return res
                     Value, gotrel = res
-                    if cmd[next + 5][0] != "end":
+                    if cmd[next + 5].kind is not TokenType.END:
                         return SyntaxError(
-                            ctx, linum, cmd[next + 5][2], "Unexpected text"
+                            ctx, linum, cmd[next + 5].ind, "Unexpected text"
                         )
                     if ctx.rel and gotrel:
                         if not ctx.sect_name:
                             return SyntaxError(
                                 ctx,
                                 linum,
-                                cmd[next][2],
+                                cmd[next].ind,
                                 "Internal: In rsect yet no name",
                             )
                         ctx.rel_list[ctx.sect_name] += [ctx.counter + 1]
                     if (
-                        cmd[next + 2][0] == "id"
-                        and cmd[next + 2][1] in ctx.exts
+                        cmd[next + 2].kind is TokenType.ID
+                        and cmd[next + 2].value in ctx.exts
                         and not ctx.macdef
                     ):
-                        ctx.exts[cmd[next + 2][1]] += [(ctx.sect_name, ctx.counter + 1)]
+                        ctx.exts[str(cmd[next + 2].value)] += [
+                            (ctx.sect_name, ctx.counter + 1)
+                        ]
                     return (label, 2, [x, Value])
             else:
-                if cmd[next + 1][0] != "end":
+                if cmd[next + 1].kind is not TokenType.END:
                     return SyntaxError(
-                        ctx, linum, cmd[next + 1][2], "Only one operand expected"
+                        ctx, linum, cmd[next + 1].ind, "Only one operand expected"
                     )
                 return (label, 1, [x])
 
@@ -833,36 +872,43 @@ def asmline(
                     return (label, 0, [])
                 return (label, 2, [bincode, 0])
             else:
-                if opcode == "ldsa" and cmd[next + 2][0] not in ("num", "-"):
+                if opcode == "ldsa" and cmd[next + 2].kind not in (
+                    TokenType.NUM,
+                    TokenType.MINUS,
+                ):
                     return SyntaxError(
                         ctx,
                         linum,
-                        cmd[next + 2][2],
+                        cmd[next + 2].ind,
                         "ldsa requires a number or a template field",
                     )
                 res = parse_exp(cmd[next : next + 3])
                 if isinstance(res, AssemblerError):
                     return res
                 Value, gotrel = res
-                if cmd[next + 3][0] != "end":
-                    return SyntaxError(ctx, linum, cmd[next + 3][2], "Unexpected text")
+                if cmd[next + 3].kind is not TokenType.END:
+                    return SyntaxError(ctx, linum, cmd[next + 3].ind, "Unexpected text")
                 if ctx.rel and opcode != "lchk" and gotrel:
                     if not ctx.sect_name:
                         return SyntaxError(
-                            ctx, linum, cmd[next][2], "Internal: In rsect yet no name"
+                            ctx, linum, cmd[next].ind, "Internal: In rsect yet no name"
                         )
                     ctx.rel_list[ctx.sect_name] += [ctx.counter + 1]
-                if cmd[next][0] == "id" and cmd[next][1] in ctx.exts and not ctx.macdef:
-                    ctx.exts[cmd[next][1]] += [(ctx.sect_name, ctx.counter + 1)]
+                if (
+                    cmd[next].kind is TokenType.ID
+                    and cmd[next].value in ctx.exts
+                    and not ctx.macdef
+                ):
+                    ctx.exts[str(cmd[next].value)] += [(ctx.sect_name, ctx.counter + 1)]
                 if opcode == "lchk":
                     return (label, 0, [])
                 return (label, 2, [bincode, Value])
         if cat == osix:
-            if cmd[next][0] != "num":
-                return SyntaxError(ctx, linum, cmd[next][2], "Number expected")
-            if cmd[next + 1][0] != "end":
-                return SyntaxError(ctx, linum, cmd[next + 1][2], "Unexpected text")
-            return (label, 2, [bincode, cmd[next][1]])
+            if cmd[next].kind is not TokenType.NUM:
+                return SyntaxError(ctx, linum, cmd[next].ind, "Number expected")
+            if cmd[next + 1].kind is not TokenType.END:
+                return SyntaxError(ctx, linum, cmd[next + 1].ind, "Unexpected text")
+            return (label, 2, [bincode, int(cmd[next].value)])
 
         if cat == zer:
             return (label, 1, [bincode])
@@ -872,39 +918,43 @@ def asmline(
                 return (label, 2, [0, 0])
             mynext = next
             mymult = 1
-            if cmd[mynext][0] == "-":
+            if cmd[mynext].kind is TokenType.MINUS:
                 mynext = next + 1
                 mymult = -1
-            if cmd[mynext][0] == "num":
-                if cmd[mynext + 1][0] != "end":
+            if cmd[mynext].kind is TokenType.NUM:
+                if cmd[mynext + 1].kind is not TokenType.END:
                     return SyntaxError(
-                        ctx, linum, cmd[mynext + 1][2], "Unexpected text"
+                        ctx, linum, cmd[mynext + 1].ind, "Unexpected text"
                     )
-                return (label, 2, [bincode, mymult * cmd[mynext][1]])
+                return (label, 2, [bincode, mymult * int(cmd[mynext].value)])
 
             if (
-                cmd[mynext][0] != "id"
-                or cmd[mynext + 1][0] != "."
-                or cmd[mynext + 2][0] != "id"
+                cmd[mynext].kind is not TokenType.ID
+                or cmd[mynext + 1].kind is not TokenType.DOT
+                or cmd[mynext + 2].kind is not TokenType.ID
             ):
                 return SyntaxError(
                     ctx,
                     linum,
-                    cmd[mynext][2],
+                    cmd[mynext].ind,
                     "addsp/setsp instructions require a number or a template field operand",
                 )
-            if cmd[mynext][1] not in ctx.tpls:
+            if cmd[mynext].value not in ctx.tpls:
                 return SyntaxError(
                     ctx,
                     linum,
-                    cmd[mynext][2],
-                    "Unknown template '{}'".format(cmd[mynext][1]),
+                    cmd[mynext].ind,
+                    "Unknown template '{}'".format(cmd[mynext].value),
                 )
-            if cmd[mynext + 3][0] != "end":
-                return SyntaxError(ctx, linum, cmd[mynext + 3][2], "Unexpected text")
+            if cmd[mynext + 3].kind is not TokenType.END:
+                return SyntaxError(ctx, linum, cmd[mynext + 3].ind, "Unexpected text")
 
-            tn = str(cmd[mynext][1])
-            return (label, 2, [bincode, mymult * ctx.tpls[tn][cmd[mynext + 2][1]]])
+            tn = str(cmd[mynext].value)
+            return (
+                label,
+                2,
+                [bincode, mymult * ctx.tpls[tn][str(cmd[mynext + 2].value)]],
+            )
 
         ################################################## M A C R O FACILITIES
         if cat == mc:
@@ -913,28 +963,28 @@ def asmline(
                     return ("", -3, [])
                 if label != "":
                     return SyntaxError(ctx, linum, 0, "Label not allowed")
-                if cmd[next][0] != "id":
-                    return SyntaxError(ctx, linum, cmd[next][2], "Name expected")
-                ctx.mname = str(cmd[next][1])
+                if cmd[next].kind is not TokenType.ID:
+                    return SyntaxError(ctx, linum, cmd[next].ind, "Name expected")
+                ctx.mname = str(cmd[next].value)
                 if ctx.mname in iset:
                     if iset[ctx.mname][1] != mi:
                         return SyntaxError(
                             ctx,
                             linum,
-                            cmd[next][2],
+                            cmd[next].ind,
                             "Opcode '{}' reserved by assembler".format(ctx.mname),
                         )
-                if cmd[next + 1][0] != "/":
-                    return SyntaxError(ctx, linum, cmd[next + 1][2], "/ expected")
-                if cmd[next + 2][0] != "num":
-                    return SyntaxError(ctx, linum, cmd[next + 2][2], "Number expected")
-                if cmd[next + 3][0] != "end":
-                    return SyntaxError(ctx, linum, cmd[next + 3][2], "Unexpected text")
-                ctx.marity = int(cmd[next + 2][1])
+                if cmd[next + 1].kind is not TokenType.SOLIDUS:
+                    return SyntaxError(ctx, linum, cmd[next + 1].ind, "/ expected")
+                if cmd[next + 2].kind is not TokenType.NUM:
+                    return SyntaxError(ctx, linum, cmd[next + 2].ind, "Number expected")
+                if cmd[next + 3].kind is not TokenType.END:
+                    return SyntaxError(ctx, linum, cmd[next + 3].ind, "Unexpected text")
+                ctx.marity = int(cmd[next + 2].value)
                 return ("", -3, [])
             elif opcode == "mend":
-                if cmd[next][0] != "end":
-                    return SyntaxError(ctx, linum, cmd[next][2], "Unexpected text")
+                if cmd[next].kind is not TokenType.END:
+                    return SyntaxError(ctx, linum, cmd[next].ind, "Unexpected text")
                 return ("", -4, [])
         if cat == mi:
             if passno == 2 or ctx.macdef:
@@ -951,7 +1001,7 @@ def asmline(
                 return SyntaxError(
                     ctx,
                     linum,
-                    cmd[next][2],
+                    cmd[next].ind,
                     "Number of params ({})does not match definition of macro {}".format(
                         parno, opcode
                     ),
@@ -1003,22 +1053,25 @@ def asmline(
                 ctx.ds_ins = True
                 return (label, Value, [0] * Value)
             if opcode == "set":
-                if cmd[next][0] != "id":
+                if cmd[next].kind is not TokenType.ID:
                     return SyntaxError(
-                        ctx, linum, cmd[next + 1][2], "Identifier expected"
+                        ctx, linum, cmd[next + 1].ind, "Identifier expected"
                     )
-                if cmd[next + 1][0] != "=":
-                    return SyntaxError(ctx, linum, cmd[next + 1][2], "'=' expected")
+                if cmd[next + 1].kind is not TokenType.EQUAL:
+                    return SyntaxError(ctx, linum, cmd[next + 1].ind, "'=' expected")
                 res = parse_exp(cmd[next + 2 : next + 5], onlyabs=True)
                 if isinstance(res, AssemblerError):
                     return res
                 Value, _ = res
                 if passno == 2:
                     return (label, -10, [Value])
-                alias = str(cmd[next][1])
+                alias = str(cmd[next].value)
                 if alias in ctx.abses:
                     return SyntaxError(
-                        ctx, linum, cmd[next + 1][2], "{} already defined".format(alias)
+                        ctx,
+                        linum,
+                        cmd[next + 1].ind,
+                        "{} already defined".format(alias),
                     )
                 ctx.abses[alias] = Value
                 return (label, -10, [Value])
@@ -1026,29 +1079,41 @@ def asmline(
                 img = []
                 empty = True
                 ctx.ds_ins = True
-                while cmd[next][0] != "end":
+                while cmd[next].kind is not TokenType.END:
                     empty = False
-                    if cmd[next][0] == "num":
-                        img += [cmd[next][1]]
-                    elif cmd[next][0] == "-" and cmd[next + 1][0] == "num":
-                        if int(cmd[next + 1][1]) > 128:
+                    if cmd[next].kind is TokenType.NUM:
+                        img += [cmd[next].value]
+                    elif (
+                        cmd[next].kind is TokenType.MINUS
+                        and cmd[next + 1].kind is TokenType.NUM
+                    ):
+                        value = int(cmd[next + 1].value)
+                        if value > 128:
                             return SyntaxError(
-                                ctx, linum, cmd[next + 1][2], "Negative out of range"
+                                ctx, linum, cmd[next + 1].ind, "Negative out of range"
                             )
-                        img += [((int(cmd[next + 1][1]) ^ 255) + 1) % 256]
+                        img += [((value ^ 255) + 1) % 256]
                         next += 1
-                    elif cmd[next][0] == "str":
-                        for c in str(cmd[next][1]):
+                    elif cmd[next].kind is TokenType.STR:
+                        for c in str(cmd[next].value):
                             img += [ord(c)]
-                    elif cmd[next][0] == "id":
+                    elif cmd[next].kind is TokenType.ID:
                         if passno == 1:
                             img += [0]
-                            if cmd[next + 1][0] == "+" or cmd[next + 1][0] == "-":
+                            if (
+                                cmd[next + 1].kind is TokenType.PLUS
+                                or cmd[next + 1].kind is TokenType.MINUS
+                            ):
                                 next += 2
                         else:
                             exp = cmd[next : next + 3]
                             res = parse_exp(
-                                [x if x[0] != "," else ["end", 0, 0] for x in exp]
+                                [
+                                    x
+                                    if x.kind is not TokenType.COMMA
+                                    else Token(TokenType.END, 0)
+                                    for x in exp
+                                ]
                             )
                             if isinstance(res, AssemblerError):
                                 return res
@@ -1058,55 +1123,60 @@ def asmline(
                                     return SyntaxError(
                                         ctx,
                                         linum,
-                                        cmd[next][2],
+                                        cmd[next].ind,
                                         "Internal: In rsect yet no name",
                                     )
                                 ctx.rel_list[ctx.sect_name] += [ctx.counter + len(img)]
                             if (
-                                cmd[next][0] == "id"
-                                and cmd[next][1] in ctx.exts
+                                cmd[next].kind is TokenType.ID
+                                and cmd[next].value in ctx.exts
                                 and not ctx.macdef
                             ):
-                                ctx.exts[cmd[next][1]] += [
+                                ctx.exts[str(cmd[next].value)] += [
                                     (ctx.sect_name, ctx.counter + len(img))
                                 ]
 
                             img += [Value]
 
-                            if cmd[next + 1][0] == "+" or cmd[next + 1][0] == "-":
+                            if (
+                                cmd[next + 1].kind is TokenType.PLUS
+                                or cmd[next + 1].kind is TokenType.MINUS
+                            ):
                                 next += 2
 
                     else:
-                        return SyntaxError(ctx, linum, cmd[next][2], "Illegal constant")
+                        return SyntaxError(
+                            ctx, linum, cmd[next].ind, "Illegal constant"
+                        )
 
-                    if cmd[next + 1][0] == ",":
+                    if cmd[next + 1].kind is TokenType.COMMA:
                         empty = True
                         next += 2
-                    elif cmd[next + 1][0] != "end":
+                    elif cmd[next + 1].kind is not TokenType.END:
                         return SyntaxError(
-                            ctx, linum, cmd[next + 1][2], "Illegal separator"
+                            ctx, linum, cmd[next + 1].ind, "Illegal separator"
                         )
                     else:
                         return (label, len(img), img)
                 if empty:
-                    return SyntaxError(ctx, linum, cmd[next][2], "Data expected")
+                    return SyntaxError(ctx, linum, cmd[next].ind, "Data expected")
 
             if opcode == "asect":
                 if label != "":
                     return SyntaxError(ctx, linum, 0, "Label not allowed")
-                if cmd[next][0] != "num":
+                if cmd[next].kind is not TokenType.NUM:
                     return SyntaxError(
-                        ctx, linum, cmd[next][2], "Numerical address expected"
+                        ctx, linum, cmd[next].ind, "Numerical address expected"
                     )
-                addr = int(cmd[next][1])
+                addr = int(cmd[next].value)
                 if addr < 0:
-                    return SyntaxError(ctx, linum, cmd[next][2], "Illegal number")
-                if cmd[next + 1][0] != "end":
-                    return SyntaxError(ctx, linum, cmd[next + 1][2], "Unexpected text")
+                    return SyntaxError(ctx, linum, cmd[next].ind, "Illegal number")
+                if cmd[next + 1].kind is not TokenType.END:
+                    return SyntaxError(ctx, linum, cmd[next + 1].ind, "Unexpected text")
                 if ctx.rel:
                     if not ctx.sect_name:
                         return SyntaxError(
-                            ctx, linum, cmd[next][2], "Internal: In rsect yet no name"
+                            ctx, linum, cmd[next].ind, "Internal: In rsect yet no name"
                         )
                     ctx.rsects[ctx.sect_name] = ctx.counter
                     ctx.rel = False
@@ -1119,22 +1189,22 @@ def asmline(
             if opcode == "tplate":
                 if label != "":
                     return SyntaxError(ctx, linum, 0, "Label not allowed")
-                if cmd[next][0] != "id":
-                    return SyntaxError(ctx, linum, cmd[next][2], "Name expected")
+                if cmd[next].kind is not TokenType.ID:
+                    return SyntaxError(ctx, linum, cmd[next].ind, "Name expected")
                 if ctx.rel:
                     if not ctx.sect_name:
                         return SyntaxError(
-                            ctx, linum, cmd[next][2], "Internal: In rsect yet no name"
+                            ctx, linum, cmd[next].ind, "Internal: In rsect yet no name"
                         )
                     ctx.rsects[ctx.sect_name] = ctx.counter
                 ctx.rel = False
-                if cmd[next][1] in ctx.tpls and passno == 1:
+                if cmd[next].value in ctx.tpls and passno == 1:
                     return SyntaxError(
-                        ctx, linum, cmd[next][2], "Template already defined"
+                        ctx, linum, cmd[next].ind, "Template already defined"
                     )
                 ctx.counter = 0
                 ctx.tpl = True
-                ctx.tpl_name = str(cmd[next][1])
+                ctx.tpl_name = str(cmd[next].value)
                 if ctx.tpl_name not in ctx.tpls:
                     ctx.tpls[ctx.tpl_name] = {}
                 ctx.sect_name = None
@@ -1142,21 +1212,21 @@ def asmline(
             if opcode == "rsect":
                 if label != "":
                     return SyntaxError(ctx, linum, 0, "Label not allowed")
-                if cmd[next][0] != "id":
-                    return SyntaxError(ctx, linum, cmd[next][2], "Name expected")
-                if cmd[next + 1][0] != "end":
-                    return SyntaxError(ctx, linum, cmd[next + 1][2], "Unexpected text")
+                if cmd[next].kind is not TokenType.ID:
+                    return SyntaxError(ctx, linum, cmd[next].ind, "Name expected")
+                if cmd[next + 1].kind is not TokenType.END:
+                    return SyntaxError(ctx, linum, cmd[next + 1].ind, "Unexpected text")
                 if ctx.rel:
                     if not ctx.sect_name:
                         return SyntaxError(
-                            ctx, linum, cmd[next][2], "Internal: In rsect yet no name"
+                            ctx, linum, cmd[next].ind, "Internal: In rsect yet no name"
                         )
                     ctx.rsects[ctx.sect_name] = ctx.counter
                 ctx.rel = True
                 if ctx.tpl:
                     ctx.tpl = False
                     ctx.tpls[ctx.tpl_name]["_"] = ctx.counter
-                ctx.sect_name = str(cmd[next][1])
+                ctx.sect_name = str(cmd[next].value)
                 if ctx.sect_name not in ctx.rsects:
                     ctx.rsects[ctx.sect_name] = 0
                     ctx.counter = 0
@@ -1165,13 +1235,17 @@ def asmline(
                     ctx.rel_list[ctx.sect_name] = []
                 else:
                     ctx.counter = ctx.rsects[ctx.sect_name]
-                return (label, -1, cmd[next][1])
+                return (label, -1, cmd[next].value)
             if opcode == "ext":
-                if cmd[next][0] != "end":
-                    return SyntaxError(ctx, linum, cmd[next][2], "Unexpected text")
+                if cmd[next].kind is not TokenType.END:
+                    return SyntaxError(ctx, linum, cmd[next].ind, "Unexpected text")
+                if not ctx.sect_name:
+                    return SyntaxError(
+                        ctx, linum, cmd[next].ind, "Internal: ext yet no section name"
+                    )
                 if label not in ctx.exts or label not in ctx.labels[ctx.sect_name]:
                     ctx.exts[label] = []
-                    return ("!" + label, 0, cmd[next][1])
+                    return ("!" + label, 0, cmd[next].value)
                 return ("", 0, [])
             if opcode == "end":
                 if label != "":
@@ -1179,7 +1253,7 @@ def asmline(
                 if ctx.rel == True:
                     if not ctx.sect_name:
                         return SyntaxError(
-                            ctx, linum, cmd[next][2], "Internal: In rsect yet no name"
+                            ctx, linum, cmd[next].ind, "Internal: In rsect yet no name"
                         )
                     ctx.rsects[ctx.sect_name] = ctx.counter
                 if passno == 1:
@@ -1761,64 +1835,75 @@ def mxpand(
         return x + res
 
 
-def unptoken(ctx, line, t):
-    if t[0] == "id":
-        return t[1]
-    if t[0] == "reg":
-        return "r" + str(t[1])
-    if t[0] == "num":
-        return "0x" + format(t[1] + 256, "02x")[-2:]
-    if t[0] == "str":
-        return '"' + (t[1].replace("\\", "\\\\")).replace('"', '\\"') + '"'
-    return SyntaxError(ctx, line, t[2], "Illegal item")
+def unptoken(ctx: Context, line: int, t: Token) -> Union[AssemblerError, str]:
+    if t.kind is TokenType.ID:
+        return str(t.value)
+    if t.kind is TokenType.REG:
+        return "r{}".format(t.value)
+    if t.kind is TokenType.NUM:
+        return "0x" + format(int(t.value) + 256, "02x")[-2:]
+    if t.kind is TokenType.STR:
+        return '"{}"'.format((str(t.value).replace("\\", "\\\\")).replace('"', '\\"'))
+    return SyntaxError(ctx, line, t.ind, "Illegal item")
 
 
 def commasep(
-    ctx, line, tokens
-):  # type: (Context, int, list) -> Union[AssemblerError, List[str]]
+    ctx: Context, line: int, tokens: List[Token]
+) -> Union[AssemblerError, List[str]]:
     k = 0
-    result = []  # type: List[str]
+    result: List[str] = []
     while k <= len(tokens) - 1:
-        if tokens[k][0] == "end":
+        if tokens[k].kind is TokenType.END:
             return result
         else:
             if (
-                tokens[k][0] == "id"
+                tokens[k].kind is TokenType.ID
                 and k <= len(tokens) - 3
-                and tokens[k + 1][0] == "."
-                and tokens[k + 2][0] == "id"
+                and tokens[k + 1].kind is TokenType.DOT
+                and tokens[k + 2].kind is TokenType.ID
             ):  # template field
-                result += [
-                    "{}.{}".format(
-                        unptoken(ctx, line, tokens[k]),
-                        unptoken(ctx, line, tokens[k + 2]),
-                    )
-                ]
+                a = unptoken(ctx, line, tokens[k])
+                if isinstance(a, AssemblerError):
+                    return a
+
+                b = unptoken(ctx, line, tokens[k + 2])
+                if isinstance(b, AssemblerError):
+                    return b
+
+                result += ["{}.{}".format(a, b)]
                 k = k + 2
             else:
-                result += [unptoken(ctx, line, tokens[k])]
+                a = unptoken(ctx, line, tokens[k])
+                if isinstance(a, AssemblerError):
+                    return a
+                result += [a]
         k = k + 1
-        if k <= len(tokens) - 1 and tokens[k][0] != "," and tokens[k][0] != "end":
-            return SyntaxError(ctx, line, tokens[k][2], "Comma expected here")
+        if (
+            k <= len(tokens) - 1
+            and tokens[k].kind is not TokenType.COMMA
+            and tokens[k].kind is not TokenType.END
+        ):
+            return SyntaxError(ctx, line, tokens[k].ind, "Comma expected here")
         else:
             k = k + 1
     return result
 
 
-def ismstack(ctx, l, s):  # type: (Context, int, str) -> Union[AssemblerError, bool]
+def ismstack(ctx: Context, l: int, s: str) -> Union[AssemblerError, bool]:
     tokens = lexline(ctx, l, s)
     if isinstance(tokens, AssemblerError):
         return tokens
 
     mstackind = 0
+    k = 0
 
     try:
         if len(tokens) >= 1:
-            if tokens[0][0] == "num":
-                mstackind = int(tokens[0][1])
+            if tokens[0].kind is TokenType.NUM:
+                mstackind = int(tokens[0].value)
                 if mstackind > len(ctx.mstack) - 1:
                     if len(tokens) > 1:
-                        mstpos = tokens[1][2]
+                        mstpos = tokens[1].ind
                     else:
                         mstpos = 0
                     return MacroError(
@@ -1830,89 +1915,100 @@ def ismstack(ctx, l, s):  # type: (Context, int, str) -> Union[AssemblerError, b
             return False
 
         if len(tokens) == 1:
-            if tokens[0][0] == "id" and (tokens[0][1] in ["mpush", "mread", "mpop"]):
+            if tokens[0].kind is TokenType.ID and (
+                tokens[0].value in ["mpush", "mread", "mpop"]
+            ):
                 return MacroError(ctx, l, 0, "Macro stack operation without argument")
             else:
                 return False
 
-        if len(tokens) >= 3 and tokens[0][0] == "id" and tokens[1][0] == ":":
-            if tokens[2][0] == "id" and (tokens[2][1] in ["mpush", "mread", "mpop"]):
+        if (
+            len(tokens) >= 3
+            and tokens[0].kind is TokenType.ID
+            and tokens[1].kind is TokenType.COLON
+        ):
+            if tokens[2].kind is TokenType.ID and (
+                tokens[2].value in ["mpush", "mread", "mpop"]
+            ):
                 return MacroError(ctx, l, 0, "Macro directives must not be labelled")
 
-        if tokens[0][0] == "id" and tokens[0][1] == "mpush":
+        if tokens[0].kind is TokenType.ID and tokens[0].value == "mpush":
             frames = commasep(ctx, l, tokens[1:])
             if isinstance(frames, AssemblerError):
                 return frames
             ctx.mstack[mstackind] = frames[::-1] + ctx.mstack[mstackind]
             return True
 
-        if tokens[0][0] == "id" and (tokens[0][1] == "mpop" or tokens[0][1] == "mread"):
+        if tokens[0].kind is TokenType.ID and (
+            tokens[0].value == "mpop" or tokens[0].value == "mread"
+        ):
             diagmes = "Macro stack {} empty or too few frames".format(mstackind)
             k = 1
             stoff = 0
             brief = False
             while k < len(tokens):
-                if tokens[k][0] == "id":
+                if tokens[k].kind is TokenType.ID:
                     if len(ctx.mstack[mstackind]) < stoff + 1:
-                        return MacroError(ctx, l, tokens[k][2], diagmes, brief)
-                    if tokens[0][1] == "mpop":
-                        ctx.mvars[str(tokens[k][1])] = ctx.mstack[mstackind][0]
+                        return MacroError(ctx, l, tokens[k].ind, diagmes, brief)
+                    if tokens[0].value == "mpop":
+                        ctx.mvars[str(tokens[k].value)] = ctx.mstack[mstackind][0]
                         ctx.mstack[mstackind] = ctx.mstack[mstackind][1:]
                     else:
-                        # Macro error here sometimes - fixed??
-                        # print("**", k, len(tokens), mstackind, len(mstack), stoff, len(mstack[mstackind]))#debug
-                        ctx.mvars[str(tokens[k][1])] = ctx.mstack[mstackind][stoff]
+                        ctx.mvars[str(tokens[k].value)] = ctx.mstack[mstackind][stoff]
                         stoff += 1
-                elif tokens[k][0] == "str":
+                elif tokens[k].kind is TokenType.STR:
                     brief = True
-                    diagmes = str(tokens[k][1])
+                    diagmes = str(tokens[k].value)
                 else:
                     return MacroError(
                         ctx,
                         l,
-                        tokens[k][2],
+                        tokens[k].ind,
                         "Macro variable or diagnostic message expected here",
                     )
                 k += 1
-                if k <= len(tokens) - 1 and tokens[k][0] != ",":
-                    return MacroError(ctx, l, tokens[k][2], "Comma expected here")
+                if k <= len(tokens) - 1 and tokens[k].kind is not TokenType.COMMA:
+                    return MacroError(ctx, l, tokens[k].ind, "Comma expected here")
                 else:
                     k += 1
             return True
 
         if (
-            tokens[0][0] == "id" and tokens[0][1] == "unique"
+            tokens[0].kind is TokenType.ID and tokens[0].value == "unique"
         ):  # not a macro stack operation but we keep it here for simplicity
             k = 1
             regfree = 4 * [True]
-            regmvars = []  # type: List[str]
+            regmvars: List[str] = []
             howmany = 0
             while k <= len(tokens) - 1:
                 howmany += 1
-                if tokens[k][0] == "id":
-                    regmvars += [str(tokens[k][1])]
-                elif tokens[k][0] == "reg":
-                    if regfree[int(tokens[k][1])]:
-                        regfree[int(tokens[k][1])] = False
+                if tokens[k].kind is TokenType.ID:
+                    regmvars += [str(tokens[k].value)]
+                elif tokens[k].kind is TokenType.REG:
+                    if regfree[int(tokens[k].value)]:
+                        regfree[int(tokens[k].value)] = False
                     else:
                         return MacroError(
                             ctx,
                             l,
-                            tokens[k][2],
-                            "r{} occurs more than once".format(tokens[k][1]),
+                            tokens[k].ind,
+                            "r{} occurs more than once".format(tokens[k].value),
                         )
                 else:
                     return MacroError(
-                        ctx, l, tokens[k][2], "Macro variable or register expected here"
+                        ctx,
+                        l,
+                        tokens[k].ind,
+                        "Macro variable or register expected here",
                     )
                 k = k + 1
-                if k <= len(tokens) - 1 and tokens[k][0] != ",":
-                    return MacroError(ctx, l, tokens[k][2], "Comma expected here")
+                if k <= len(tokens) - 1 and tokens[k].kind is not TokenType.COMMA:
+                    return MacroError(ctx, l, tokens[k].ind, "Comma expected here")
                 else:
                     k = k + 1
             if howmany > 4:
                 return MacroError(
-                    ctx, l, tokens[0][2], "More than 4 operands specified"
+                    ctx, l, tokens[0].ind, "More than 4 operands specified"
                 )
             for v in regmvars:
                 ctx.mvars[v] = ""
@@ -1924,7 +2020,7 @@ def ismstack(ctx, l, s):  # type: (Context, int, str) -> Union[AssemblerError, b
                             return MacroError(
                                 ctx,
                                 l,
-                                tokens[0][2],
+                                tokens[0].ind,
                                 "macro var ‘{}’ occurs more than once".format(v),
                             )
                         else:
@@ -1933,7 +2029,7 @@ def ismstack(ctx, l, s):  # type: (Context, int, str) -> Union[AssemblerError, b
             return True
 
     except:
-        return MacroError(ctx, l, int(tokens[k][1]), "Macro error!", True)
+        return MacroError(ctx, l, tokens[k].ind, "Macro error!", True)
 
     return False
 
