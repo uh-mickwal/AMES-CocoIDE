@@ -581,9 +581,93 @@ def lexline(ctx: Context, linum: int, s: str) -> Union[AssemblerError, List[Toke
     return r
 
 
+class Node:
+    label: Optional[str] = None
+
+
+class SizedNode:
+    size: int
+
+
+class MacroNode(Node):
+    pass
+
+
+class MendNode(Node):
+    pass
+
+
+class CodeNode(Node, SizedNode):
+    code: List[int]
+
+    def __init__(
+        self, label: Optional[str] = None, size: int = 0, code: List[int] = []
+    ) -> None:
+        self.label = label
+        self.size = size
+        self.code = code
+
+
+class ConstantNode(CodeNode):
+    def __init__(self, label: Optional[str], code: List[int] = []) -> None:
+        super().__init__(label, len(code), code)
+
+
+class SpaceNode(CodeNode):
+    value: List[int]
+
+    def __init__(self, label: Optional[str], size: int) -> None:
+        super().__init__(label, size, [0] * size)
+
+
+class MacroExpandNode(Node):
+    value: List[str]
+
+    def __init__(self, value: List[str] = []) -> None:
+        self.value = value
+
+
+class SetNode(Node):
+    def __init__(self, label: Optional[str], value: int) -> None:
+        self.label = label
+        self.value = value
+
+
+class SectionNode(Node):
+    pass
+
+
+class AsectNode(SectionNode):
+    address: int
+
+    def __init__(self, address: int) -> None:
+        self.address = address
+
+
+class TplateNode(SectionNode):
+    pass
+
+
+class RsectNode(SectionNode):
+    name: str
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class EndNode(Node):
+    pass
+
+
+class ExtNode(Node):
+    def __init__(self, label: str, name: str) -> None:
+        self.label = label
+        self.name = name
+
+
 def asmline(
     ctx: Context, s: str, linum: int, passno: int
-) -> Union[AssemblerError, Tuple[str, int, List[int]]]:
+) -> Union[AssemblerError, Node]:
     def parse_exp(
         lst: List[Token], onlyabs: bool = False
     ) -> Union[Tuple[int, bool], SyntaxError]:
@@ -695,12 +779,12 @@ def asmline(
         return lex_res
     cmd = lex_res + [Token(TokenType.END, 0)] * 3
     if cmd[0].kind is TokenType.EMPTY:
-        return ("", 0, [])
+        return CodeNode()
     if cmd[0].kind is not TokenType.ID:
         return SyntaxError(ctx, linum, cmd[0].ind, "Label or opcode expected")
     else:
         next = 1
-        label = ""
+        label = None
         opcode = str(cmd[0].value)
         pos = cmd[0].ind
         if cmd[1].kind is TokenType.COLON or cmd[1].kind is TokenType.GREATER:
@@ -713,7 +797,7 @@ def asmline(
                 opcode = str(cmd[2].value)
                 pos = cmd[2].ind
                 if cmd[2].kind is TokenType.END:
-                    return (label, 0, [])
+                    return CodeNode(label)
             else:
                 return SyntaxError(ctx, linum, cmd[2].ind, "Illegal opcode")
         if opcode not in iset:
@@ -729,7 +813,7 @@ def asmline(
             if cmd[next + 3].kind is not TokenType.END:
                 return SyntaxError(ctx, linum, cmd[next + 3].ind, "Unexpected text")
             x = bincode + 4 * int(cmd[next].value) + int(cmd[next + 2].value)
-            return (label, 1, [x])
+            return CodeNode(label, 1, [x])
         if cat == un:
             if opcode in ("ldsa", "addsp", "setsp", "pushall", "popall") and ctx.v3:
                 return SyntaxError(
@@ -746,7 +830,7 @@ def asmline(
                 if cmd[next + 1].kind is not TokenType.COMMA:
                     return SyntaxError(ctx, linum, cmd[next + 1].ind, "Comma expected")
                 if passno == 1:
-                    return (label, 2, [x, 0])
+                    return CodeNode(label, 2, [x, 0])
                 elif cmd[next + 2].kind is TokenType.STR:
                     strVal = str(cmd[next + 2].value)
                     if len(strVal) > 1:
@@ -760,7 +844,7 @@ def asmline(
                             cmd[next + 2].ind,
                             "ldsa requires a number or a template field",
                         )
-                    return (label, 2, [x, ord(strVal[0])])
+                    return CodeNode(label, 2, [x, ord(strVal[0])])
                 elif cmd[next + 3].kind is TokenType.DOT:  # template reference
                     if cmd[next + 2].kind is not TokenType.ID:
                         return SyntaxError(
@@ -787,7 +871,7 @@ def asmline(
                             "unexpected token after template field",
                         )
                     y = ctx.tpls[tn][str(cmd[next + 4].value)]
-                    return (label, 2, [x, y])
+                    return CodeNode(label, 2, [x, y])
                 else:
                     res = parse_exp(cmd[next + 2 : next + 5])
                     if isinstance(res, AssemblerError):
@@ -814,19 +898,19 @@ def asmline(
                         ctx.exts[str(cmd[next + 2].value)] += [
                             (ctx.sect_name, ctx.counter + 1)
                         ]
-                    return (label, 2, [x, Value])
+                    return CodeNode(label, 2, [x, Value])
             else:
                 if cmd[next + 1].kind is not TokenType.END:
                     return SyntaxError(
                         ctx, linum, cmd[next + 1].ind, "Only one operand expected"
                     )
-                return (label, 1, [x])
+                return CodeNode(label, 1, [x])
 
         if cat == br:
             if passno == 1:
                 if opcode == "lchk":
-                    return (label, 0, [])
-                return (label, 2, [bincode, 0])
+                    return CodeNode(label, 0, [])
+                return CodeNode(label, 2, [bincode, 0])
             else:
                 if opcode == "ldsa" and cmd[next + 2].kind not in (
                     TokenType.NUM,
@@ -857,21 +941,21 @@ def asmline(
                 ):
                     ctx.exts[str(cmd[next].value)] += [(ctx.sect_name, ctx.counter + 1)]
                 if opcode == "lchk":
-                    return (label, 0, [])
-                return (label, 2, [bincode, Value])
+                    return CodeNode(label, 0, [])
+                return CodeNode(label, 2, [bincode, Value])
         if cat == osix:
             if cmd[next].kind is not TokenType.NUM:
                 return SyntaxError(ctx, linum, cmd[next].ind, "Number expected")
             if cmd[next + 1].kind is not TokenType.END:
                 return SyntaxError(ctx, linum, cmd[next + 1].ind, "Unexpected text")
-            return (label, 2, [bincode, int(cmd[next].value)])
+            return CodeNode(label, 2, [bincode, int(cmd[next].value)])
 
         if cat == zer:
-            return (label, 1, [bincode])
+            return CodeNode(label, 1, [bincode])
 
         if cat == spmove:  # addsp/setsp
             if passno == 1:
-                return (label, 2, [0, 0])
+                return CodeNode(label, 2, [0, 0])
             mynext = next
             mymult = 1
             if cmd[mynext].kind is TokenType.MINUS:
@@ -882,7 +966,7 @@ def asmline(
                     return SyntaxError(
                         ctx, linum, cmd[mynext + 1].ind, "Unexpected text"
                     )
-                return (label, 2, [bincode, mymult * int(cmd[mynext].value)])
+                return CodeNode(label, 2, [bincode, mymult * int(cmd[mynext].value)])
 
             if (
                 cmd[mynext].kind is not TokenType.ID
@@ -906,7 +990,7 @@ def asmline(
                 return SyntaxError(ctx, linum, cmd[mynext + 3].ind, "Unexpected text")
 
             tn = str(cmd[mynext].value)
-            return (
+            return CodeNode(
                 label,
                 2,
                 [bincode, mymult * ctx.tpls[tn][str(cmd[mynext + 2].value)]],
@@ -916,8 +1000,8 @@ def asmline(
         if cat == mc:
             if opcode == "macro":
                 if ctx.macdef:
-                    return ("", -3, [])
-                if label != "":
+                    return MacroNode()
+                if label:
                     return SyntaxError(ctx, linum, 0, "Label not allowed")
                 if cmd[next].kind is not TokenType.ID:
                     return SyntaxError(ctx, linum, cmd[next].ind, "Name expected")
@@ -937,14 +1021,14 @@ def asmline(
                 if cmd[next + 3].kind is not TokenType.END:
                     return SyntaxError(ctx, linum, cmd[next + 3].ind, "Unexpected text")
                 ctx.marity = int(cmd[next + 2].value)
-                return ("", -3, [])
+                return MacroNode()
             elif opcode == "mend":
                 if cmd[next].kind is not TokenType.END:
                     return SyntaxError(ctx, linum, cmd[next].ind, "Unexpected text")
-                return ("", -4, [])
+                return MendNode()
         if cat == mi:
             if passno == 2 or ctx.macdef:
-                return ("", 0, [])
+                return CodeNode()
             ctx.mcalls += 1
             if ctx.mcalls > 800:
                 return SyntaxError(ctx, linum, 0, "Too many macro expansions [>800]")
@@ -963,7 +1047,7 @@ def asmline(
                     ),
                 )
 
-            if label == "":
+            if not label:
                 ll = []
             elif label[0] == ">":
                 ll = [label[1:] + ">"]
@@ -976,7 +1060,7 @@ def asmline(
                 + ctx.macros["{}/{}".format(opcode, parno)]
                 + ["# <<<<<<"]
             )
-            newbody = []
+            newbody: List[str] = []
             for s1 in mbody:
                 if ctx.dbg:
                     print(
@@ -995,19 +1079,19 @@ def asmline(
                 if not m_res:
                     newbody += ["{}#{}".format(rslt, chr(1))]
             ctx.mcount += 1
-            return ("", -5, newbody)
+            return MacroExpandNode(newbody)
         ################################################## END OF MACRO FACILITIES
 
         if ctx.macdef:
-            return ("", 0, [])
+            return CodeNode()
         if cat == spec:
             if opcode == "ds":
                 res = parse_exp(cmd[next : next + 3], onlyabs=True)
                 if isinstance(res, AssemblerError):
                     return res
-                Value, _ = res
+                size, _ = res
                 ctx.ds_ins = True
-                return (label, Value, [0] * Value)
+                return SpaceNode(label, size)
             if opcode == "set":
                 if cmd[next].kind is not TokenType.ID:
                     return SyntaxError(
@@ -1018,9 +1102,9 @@ def asmline(
                 res = parse_exp(cmd[next + 2 : next + 5], onlyabs=True)
                 if isinstance(res, AssemblerError):
                     return res
-                Value, _ = res
+                value, _ = res
                 if passno == 2:
-                    return (label, -10, [Value])
+                    return SetNode(label, value)
                 alias = str(cmd[next].value)
                 if alias in ctx.abses:
                     return SyntaxError(
@@ -1029,16 +1113,16 @@ def asmline(
                         cmd[next + 1].ind,
                         "{} already defined".format(alias),
                     )
-                ctx.abses[alias] = Value
-                return (label, -10, [Value])
+                ctx.abses[alias] = value
+                return SetNode(label, value)
             if opcode == "dc":
-                img = []
+                img: List[int] = []
                 empty = True
                 ctx.ds_ins = True
                 while cmd[next].kind is not TokenType.END:
                     empty = False
                     if cmd[next].kind is TokenType.NUM:
-                        img += [cmd[next].value]
+                        img += [int(cmd[next].value)]
                     elif (
                         cmd[next].kind is TokenType.MINUS
                         and cmd[next + 1].kind is TokenType.NUM
@@ -1113,12 +1197,12 @@ def asmline(
                             ctx, linum, cmd[next + 1].ind, "Illegal separator"
                         )
                     else:
-                        return (label, len(img), img)
+                        return ConstantNode(label, img)
                 if empty:
                     return SyntaxError(ctx, linum, cmd[next].ind, "Data expected")
 
             if opcode == "asect":
-                if label != "":
+                if label:
                     return SyntaxError(ctx, linum, 0, "Label not allowed")
                 if cmd[next].kind is not TokenType.NUM:
                     return SyntaxError(
@@ -1141,9 +1225,9 @@ def asmline(
                     ctx.tpls[ctx.tpl_name]["_"] = ctx.counter
                 ctx.counter = addr
                 ctx.sect_name = "$abs"
-                return ("", -1, [])
+                return AsectNode(addr)
             if opcode == "tplate":
-                if label != "":
+                if label:
                     return SyntaxError(ctx, linum, 0, "Label not allowed")
                 if cmd[next].kind is not TokenType.ID:
                     return SyntaxError(ctx, linum, cmd[next].ind, "Name expected")
@@ -1164,9 +1248,9 @@ def asmline(
                 if ctx.tpl_name not in ctx.tpls:
                     ctx.tpls[ctx.tpl_name] = {}
                 ctx.sect_name = None
-                return ("", -1, [])
+                return TplateNode()
             if opcode == "rsect":
-                if label != "":
+                if label:
                     return SyntaxError(ctx, linum, 0, "Label not allowed")
                 if cmd[next].kind is not TokenType.ID:
                     return SyntaxError(ctx, linum, cmd[next].ind, "Name expected")
@@ -1191,22 +1275,24 @@ def asmline(
                     ctx.rel_list[ctx.sect_name] = []
                 else:
                     ctx.counter = ctx.rsects[ctx.sect_name]
-                return (label, -1, cmd[next].value)
+                return RsectNode(ctx.sect_name)
             if opcode == "ext":
                 if cmd[next].kind is not TokenType.END:
                     return SyntaxError(ctx, linum, cmd[next].ind, "Unexpected text")
+                if not label:
+                    return SyntaxError(ctx, linum, cmd[next].ind, "Should be labeled")
                 if not ctx.sect_name:
                     return SyntaxError(
                         ctx, linum, cmd[next].ind, "Internal: ext yet no section name"
                     )
                 if label not in ctx.exts or label not in ctx.labels[ctx.sect_name]:
                     ctx.exts[label] = []
-                    return ("!" + label, 0, cmd[next].value)
-                return ("", 0, [])
+                    return ExtNode("!" + label, str(cmd[next].value))
+                return CodeNode()
             if opcode == "end":
-                if label != "":
+                if label:
                     return SyntaxError(ctx, linum, 0, "Illegal label")
-                if ctx.rel == True:
+                if ctx.rel:
                     if not ctx.sect_name:
                         return SyntaxError(
                             ctx, linum, cmd[next].ind, "Internal: In rsect yet no name"
@@ -1219,27 +1305,27 @@ def asmline(
                     for name in ctx.rsects:
                         ctx.rsects[name] = 0
                 ctx.rel = False
-                return ("$$$", -2, [])
+                return EndNode()
         else:
             return SyntaxError(
                 ctx, linum, 0, "Internal error: {} {}{}".format(opcode, cat, linum)
             )
 
 
-def asm(ctx, assmtext=None):
-    if assmtext != None:
+def asm(
+    ctx: Context, assmtext: Optional[List[str]] = None
+) -> Union[AssemblerError, List[Tuple[int, int, List[int], str]]]:
+    if assmtext is not None:
         ctx.text = assmtext
 
-    output = []  # type: List[Tuple[int, int, List[str], str]]
+    output: List[Tuple[int, int, List[int], str]] = []
     ctx.generated = len(ctx.text) * [False]
     for passno in [1, 2]:
         linum = 0
         linind = 0
         ready = False
         finished = False
-        size = 0
-        label = ""
-        code = []  # type: List[Any]
+
         while True:
             if linind <= len(ctx.text) - 1:
                 s = ctx.text[linind]
@@ -1253,19 +1339,19 @@ def asm(ctx, assmtext=None):
             if isinstance(res, AssemblerError):
                 if not ctx.macdef or not isinstance(res, SyntaxError):
                     return res
-                else:
-                    size = 0
-            else:
-                (label, size, code) = res
 
-            if ctx.macdef and size != -4 and size != -3:  # accumulate macro definition
+            if (
+                ctx.macdef
+                and not isinstance(res, MendNode)
+                and not isinstance(res, MacroNode)
+            ):  # accumulate macro definition
                 if passno == 1:
                     mbody += [s]
                 continue
-            if size == -1:  # sects
+            if isinstance(res, SectionNode):  # sects
                 ready = True
                 continue
-            elif size == -2:  # end
+            elif isinstance(res, EndNode):
                 if ctx.macdef:
                     return SyntaxError(
                         ctx,
@@ -1275,15 +1361,15 @@ def asm(ctx, assmtext=None):
                     )
                 finished = True
                 break
-            elif size == -3:  # macro
+            elif isinstance(res, MacroNode):  # macro
                 if ctx.macdef:
                     return SyntaxError(
                         ctx, linum, -1, "ERROR: macro definition inside macro"
                     )
                 ctx.macdef = True
-                mbody = []  # type: List[str]
+                mbody: List[str] = []
                 continue
-            elif size == -4:  # mend
+            elif isinstance(res, MendNode):  # mend
                 if not ctx.macdef:
                     return SyntaxError(ctx, linum, -1, "ERROR: mend before macro")
                 ctx.macdef = False
@@ -1291,25 +1377,23 @@ def asm(ctx, assmtext=None):
                     ctx.macros["{}/{}".format(ctx.mname, ctx.marity)] = mbody
                     iset[ctx.mname] = (0, mi)
                 continue
-
-            elif size == -5:  # macro expansion
-                ctx.text = ctx.text[0:linind] + code + ctx.text[linind:]
+            elif isinstance(res, MacroExpandNode):  # macro expansion
+                ctx.text = ctx.text[0:linind] + res.value + ctx.text[linind:]
                 ctx.generated = (
                     ctx.generated[0:linind]
-                    + len(code) * [True]
+                    + len(res.value) * [True]
                     + ctx.generated[linind:]
                 )
                 continue
-
-            elif size == -10:  # set
+            elif isinstance(res, SetNode):  # set
                 if passno == 2:
                     output += [
-                        (linind, code[0], [], "")
+                        (linind, res.value, [], "")
                     ]  # dummy output to get addresses in listing
                 continue
-            elif size >= 0:  # deal with the label off a true instruction
+            else:  # deal with the label off a true instruction
                 if ctx.tpl and passno == 1:
-                    if not ctx.ds_ins and size > 0:
+                    if not ctx.ds_ins and isinstance(res, SizedNode) and res.size > 0:
                         return SyntaxError(
                             ctx,
                             linum,
@@ -1319,7 +1403,7 @@ def asm(ctx, assmtext=None):
                             ),
                         )
                     ctx.ds_ins = False
-                if label != "" and passno == 1:
+                if isinstance(res, Node) and res.label and passno == 1:
                     if not ready:
                         return SyntaxError(
                             ctx,
@@ -1331,7 +1415,7 @@ def asm(ctx, assmtext=None):
                         )
                     addr = ctx.counter
                     if ctx.tpl:
-                        if label[0] == ">":
+                        if res.label[0] == ">":
                             return SyntaxError(
                                 ctx,
                                 linum,
@@ -1340,21 +1424,21 @@ def asm(ctx, assmtext=None):
                                     linum
                                 ),
                             )
-                        if label in ctx.tpls[ctx.tpl_name]:
+                        if res.label in ctx.tpls[ctx.tpl_name]:
                             return SyntaxError(
                                 ctx,
                                 linum,
                                 -1,
                                 "On line {} ERROR: Label ‘{}’ already defined".format(
-                                    linum, label
+                                    linum, res.label
                                 ),
                             )
-                        ctx.tpls[ctx.tpl_name][label] = ctx.counter
-                    if label[0] == ">":
-                        label = label[1:]
+                        ctx.tpls[ctx.tpl_name][res.label] = ctx.counter
+                    if res.label[0] == ">":
+                        label = res.label[1:]
                         ctx.ents[ctx.sect_name][label] = ctx.counter
-                    if label[0] == "!":
-                        if label[1] == ">":
+                    if res.label[0] == "!":
+                        if res.label[1] == ">":
                             return SyntaxError(
                                 ctx,
                                 linum,
@@ -1363,37 +1447,42 @@ def asm(ctx, assmtext=None):
                                     linum, label[2:]
                                 ),
                             )
-                        label = label[1:]
+                        label = res.label[1:]
                         addr = 0
-                    if not ctx.tpl and label in ctx.labels[ctx.sect_name]:
+                    if not ctx.tpl and res.label in ctx.labels[ctx.sect_name]:
                         return SyntaxError(
                             ctx,
                             linum,
                             -1,
                             "On line {} ERROR: Label ‘{}’ already defined".format(
-                                linum, label
+                                linum, res.label
                             ),
                         )
                     if not ctx.tpl:
-                        ctx.labels[ctx.sect_name][label] = addr
+                        ctx.labels[ctx.sect_name][res.label] = addr
                     if not ctx.rel:
-                        ctx.abses[label] = ctx.counter
+                        ctx.abses[res.label] = ctx.counter
 
-            if passno == 2 and size > 0 and not ctx.tpl:
-                if not ready:
+            if (
+                passno == 2
+                and isinstance(res, CodeNode)
+                and res.size > 0
+                and not ctx.tpl
+            ):
+                if not ready or not ctx.sect_name:
                     return SyntaxError(
                         ctx,
                         linum,
                         -1,
                         "On line {} ERROR: 'asect' or 'rsect' expected".format(linum),
                     )
-                output += [(linind, ctx.counter, code, ctx.sect_name)]
+                output += [(linind, ctx.counter, res.code, ctx.sect_name)]
             if passno == 2 and ctx.tpl:
                 output += [
                     (linind, ctx.counter, [], "")
                 ]  # dummy output to get addresses in listing
-            if size > 0:
-                ctx.counter += size
+            if isinstance(res, SizedNode) and res.size > 0:
+                ctx.counter += res.size
         if not finished:
             return SyntaxError(ctx, linum, 0, "ERROR: file ends before end of program")
     return output
@@ -1417,7 +1506,7 @@ def pretty_print(ctx, obj1, src, prtOP=True):
     # else:
     offset = 15
 
-    if prtOP == True:
+    if prtOP:
         print(
             "\nCdM-8 Assembler v{} <<<{}.asm>>> {} {}\n".format(
                 ASM_VER,
@@ -1587,9 +1676,11 @@ def pretty_print(ctx, obj1, src, prtOP=True):
 
 
 def genoc(
-    ctx, output, objfile=None
-):  # type: (Context, List[Tuple[int, int, List[str], str]], Optional[IO[str]]) -> Optional[str]
-    def eladj(absegs):
+    ctx: Context,
+    output: List[Tuple[int, int, List[int], str]],
+    objfile: Optional[IO[str]] = None,
+) -> Optional[str]:
+    def eladj(absegs: List[Tuple[int, List[int]]]) -> List[Tuple[int, List[int]]]:
         if len(absegs) < 2:  # elimenate adjacent segments
             return absegs
         x, y, w = absegs[0], absegs[1], absegs[2:]
@@ -1603,8 +1694,8 @@ def genoc(
     else:
         buff = objbuff = io.StringIO()
 
-    sects = {}  # type: Dict[str, List[str]]
-    absegs = []
+    sects: Dict[str, List[int]] = {}
+    absegs: List[Tuple[int, List[int]]] = []
     for r in output:
         s = r[3]
         a = r[1]
