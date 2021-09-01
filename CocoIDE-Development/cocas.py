@@ -29,7 +29,7 @@ ASM_VER = "2.7"
 
 
 class Context:
-    def __init__(self, cdm8ver=4):  # type: (int) -> None
+    def __init__(self, cdm8ver: int = 4) -> None:
         if cdm8ver == 4:
             self.v3 = False
         else:
@@ -39,25 +39,25 @@ class Context:
 
         self.lst = False
 
-        self.filename = None  # type: Optional[str]
-        self.text = []  # type: List[str]
-        self.raw_text = []  # type: List[str]
+        self.filename: Optional[str] = None
+        self.text: List[str] = []
+        self.raw_text: List[str] = []
         self.counter = 0
         self.rel = False
-        self.rel_list = {}  # type: Dict[str, List[int]]
-        self.exts = {}  # type: Dict[str, List[Tuple[Optional[str], int]]]
-        self.ents = {}  # type: Dict[str, Dict[str, int]]
-        self.abses = {}  # type: Dict[str, int]
-        self.labels = {}  # type: Dict[str, Dict[str, int]]
-        self.rsects = {}  # type: Dict[str, int]
-        self.sect_name = None  # type: Optional[str]
+        self.rel_list: Dict[str, List[int]] = {}
+        self.exts: Dict[str, List[Tuple[Optional[str], int]]] = {}
+        self.ents: Dict[str, Dict[str, int]] = {}
+        self.abses: Dict[str, int] = {}
+        self.labels: Dict[str, Dict[str, int]] = {}
+        self.rsects: Dict[str, int] = {}
+        self.sect_name: Optional[str] = None
         self.labels["$abs"] = {}
         self.ents["$abs"] = {}
-        self.tpls = {}  # type: Dict[str, Dict[str, int]]
+        self.tpls: Dict[str, Dict[str, int]] = {}
         self.tpl = False
         self.ds_ins = False
         self.tpl_name = ""
-        self.generated = []  # type: List[bool]
+        self.generated: List[bool] = []
         self.got_minus = False
         self.lst_me = False  # flag: include macro expansions in listing
         # macro vars as well
@@ -66,10 +66,10 @@ class Context:
         self.macdef = False
         self.mname = ""
         self.marity = 0
-        self.mvars = {}  # type: Dict[str, str]
-        self.macros = {}  # type: Dict[str, List[str]]
-        self.mstack = [[], [], [], [], [], []]  # type: List[List[str]]
-        self.pars = []  # type: List[str]
+        self.mvars: Dict[str, str] = {}
+        self.macros: Dict[str, List[str]] = {}
+        self.mstack: List[List[str]] = [[], [], [], [], [], []]
+        self.pars: List[str] = []
 
 
 # Used by CocoIDE when imported
@@ -87,7 +87,7 @@ spec = -4  # special assembler instructions
 mc = -5  # assembler macro/mend commands
 mi = -6  # macro instruction
 
-iset = {
+iset: Dict[str, Tuple[int, int]] = {
     # binary
     "move": (0x00, bi),
     "add": (0x10, bi),
@@ -298,15 +298,13 @@ class CocAs(tk.Tk):
 
 
 class AssemblerError:
-    def __init__(
-        self, ctx, line, col, message
-    ):  # type (Context, int, int, str) -> None
+    def __init__(self, ctx: Context, line: int, col: int, message: str) -> None:
         self.ctx = ctx
         self.line = line
         self.col = col
         self.message = message
 
-    def dump(self):  # type: () -> None
+    def dump(self) -> None:
         if self.col >= 0:
             source = "{}\n{}^".format(
                 self.ctx.raw_text[self.line - 1], " " * (self.col + 1)
@@ -323,27 +321,28 @@ class AssemblerError:
 
 
 class LexerError(AssemblerError):
-    def __init__(
-        self, ctx, line, col, message
-    ):  # type (Context, int, int, str) -> None
+    def __init__(self, ctx: Context, line: int, col: int, message: str) -> None:
         super().__init__(ctx, line, col, message)
 
 
 class SyntaxError(AssemblerError):
-    def __init__(
-        self, ctx, line, col, message
-    ):  # type (Context, int, int, str) -> None
+    def __init__(self, ctx: Context, line: int, col: int, message: str) -> None:
         super().__init__(ctx, line, col, message)
 
 
 class MacroError(AssemblerError):
     def __init__(
-        self, ctx, line, col, message, user_message=False
-    ):  # type (Context, int, int, str, bool) -> None
+        self,
+        ctx: Context,
+        line: int,
+        col: int,
+        message: str,
+        user_message: bool = False,
+    ) -> None:
         super().__init__(ctx, line, col, message)
         self.user_message = user_message
 
-    def dump(self):  # type: () -> None
+    def dump(self) -> None:
         if self.col >= 0:
             source = "{}\n{}^".format(
                 self.ctx.raw_text[self.line - 1], " " * (self.col + 1)
@@ -1558,7 +1557,7 @@ def pretty_print(ctx, obj1, src, prtOP=True):
             if obj == [] or (
                 obj != [] and obj[0][0] > last_line
             ):  # macro produced no code
-                if prtOP == True:
+                if prtOP:
                     print(
                         "{} {:3d}  {}".format(" " * offset, ln, s)
                     )  # just print the mi
@@ -1578,7 +1577,7 @@ def pretty_print(ctx, obj1, src, prtOP=True):
                         clist += obj[k][2]
                         a1 += len(obj[k][2])
                     else:
-                        if prtOP == True:
+                        if prtOP:
                             print(
                                 "{} {:3d}  {}".format(
                                     ("<scattered>" + " " * offset)[0:offset], ln, s
@@ -1601,7 +1600,7 @@ def pretty_print(ctx, obj1, src, prtOP=True):
                     obj = [(lnind + 1, addr, clist, secname)] + obj[k:]
 
         if obj == [] or obj[0][0] != lnind + 1:
-            if prtOP == True:
+            if prtOP:
                 print("{} {:3d}  {}".format(" " * offset, ln, s))
             else:
                 retlist += "{} {:3d}  {}\n".format(" " * offset, ln, s)
@@ -1613,7 +1612,7 @@ def pretty_print(ctx, obj1, src, prtOP=True):
             tstr = s
             ln1 = ln
             if secname == "":  # template
-                if prtOP == True:
+                if prtOP:
                     print(
                         "{} {:3d}  {}".format(
                             "{:02x}: {}".format(addr, " " * offset)[0:offset], ln1, s
@@ -1630,7 +1629,7 @@ def pretty_print(ctx, obj1, src, prtOP=True):
                     sln = format(ln1, "3d")
                 else:
                     sln = " "
-                if prtOP == True:
+                if prtOP:
                     print("{} {}  {}".format(ppr, sln, tstr))
                 else:
                     retlist += "{} {}  {}\n".format(ppr, sln, tstr)
@@ -1641,7 +1640,7 @@ def pretty_print(ctx, obj1, src, prtOP=True):
                 ln1 = 0
                 clist = clist[4:]
 
-    if prtOP == True:  # Not needed for cocide
+    if prtOP:  # Not needed for cocide
         print("\n" + "=" * 70)
         print("\nSECTIONS:\nName\tSize\tRelocation offsets\n")
 
@@ -1737,9 +1736,9 @@ def genoc(
 
 
 def takemdefs(
-    ctx, objfile, filename
-):  # type: (Context, IO, str) -> Optional[AssemblerError]
-    def formerr():
+    ctx: Context, objfile: IO[str], filename: str
+) -> Optional[AssemblerError]:
+    def formerr() -> MacroError:
         return MacroError(
             ctx,
             ln,
@@ -1798,8 +1797,8 @@ def takemdefs(
 
 
 def mxpand(
-    ctx, line, s, pos, pno
-):  # type: (Context, int, str, int, int) -> Union[str, AssemblerError]
+    ctx: Context, line: int, s: str, pos: int, pno: int
+) -> Union[str, AssemblerError]:
     # substitute factual pars for $1...$<pno> in s escaping quoted strings
     # substitute a nonce for ' and strings for ?<id> from mvars
 
@@ -2137,7 +2136,7 @@ def compile_asm(codetext=None, cdm8ver=4, ctx=None):
     return objstr, codelist, None
 
 
-def main():  # type: () -> None
+def main() -> None:
     parser = argparse.ArgumentParser(description="CdM-8 Assembler v1.0")
     parser.add_argument("filename", nargs="?", type=str, help="source_file[.asm]")
     parser.add_argument(
