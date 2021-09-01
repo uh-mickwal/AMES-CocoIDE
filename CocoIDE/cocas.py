@@ -1810,7 +1810,7 @@ def mxpand(
     x = s[0]
 
     if x == "$":
-        if not s[1].isdigit:
+        if not s[1].isdigit():
             return SyntaxError(ctx, line, pos, "Illegal parameter number")
         n = int(s[1])
         if n > pno:
