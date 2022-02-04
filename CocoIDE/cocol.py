@@ -12,32 +12,33 @@ from __future__ import absolute_import, division, print_function
 
 try:
     input = raw_input  # Python 3 style input()
-except:
+except NameError:
     pass  # Running on Python 3
 
-TITLE = "Cocol Linker GUI V2.0"
 import argparse
-import sys
 import os
+import sys
+from typing import List, Optional
 
 try:
     # Python 3 tk
     import tkinter as tk
-    from tkinter import ttk
-    from tkinter import filedialog
-    from tkinter import messagebox
-    from tkinter import scrolledtext as sctx
     import tkinter.font as font
-
-except:
+    from tkinter import filedialog, messagebox
+    from tkinter import scrolledtext as sctx
+    from tkinter import ttk
+except ImportError:
     # Python 2 tk (runs but not exhaustively tested!)
     # Ames lib (sendfile.py) not python 2 compatible (urllib)
-    import Tkinter as tk
-    import ttk
-    import tkFileDialog as filedialog
-    import tkMessageBox as messagebox
     import ScrolledText as sctx
+    import tkFileDialog as filedialog
     import tkFont as font
+    import Tkinter as tk
+    import tkMessageBox as messagebox
+    import ttk
+
+
+TITLE = "Cocol Linker GUI V2.0"
 
 
 IMG = [0] * 256
@@ -50,73 +51,87 @@ term = False
 
 
 class CocoLink(tk.Tk):
-    def __init__(self, master=None, name="cocol", exitroot=False, sym=True):
-        self.master = master
-        self.mainWin = tk.Toplevel(master=master)
+    def __init__(self, master=None, name="cocol", exitroot=False, sym=True) -> None:
+        super().__init__()
+        self.master: tk.Misc = master
+        self.mainWin: tk.Toplevel = tk.Toplevel(master=master)
         self.mainWin.lift()
         # self.mainWin.update()
         # self.mainWin.wm_attributes("-topmost", False)
 
-        # self.mainWin.__init__()
-        self.mainWin.resizable(width=False, height=False)  # width=False, height=False)
+        # Sets up the window
+        self.mainWin.resizable(width=False, height=False)
         self.mainWin.title("Link files: cocol GUI")
         if __name__ == "__main__":
             self.mainWin.protocol(
                 "WM_DELETE_WINDOW", self.closeCocol
             )  # Only if main module
         self.mainWin.focus()
-        ## Create buttonbar, link and status panels
-        buttonBar = tk.Frame(
+
+        # Create buttonbar panel
+        buttonBar: tk.Frame = tk.Frame(
             self.mainWin, name="buttonbar", height=35, width=400, border=2, pady=5
-        )  # , bg="red")
+        )
         buttonBar.pack(side=tk.TOP, fill=tk.X, expand=False)
 
-        linkPanel = tk.Frame(
+        # Create link panel
+        linkPanel: tk.Frame = tk.Frame(
             self.mainWin, name="link", border=2, relief="sunken", pady=5
-        )  # , bg="white")
+        )
         linkPanel.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
-        self.linkText = sctx.ScrolledText(linkPanel, height=10)
+        self.linkText: sctx.ScrolledText = sctx.ScrolledText(linkPanel, height=10)
         self.linkText.pack(expand=1)
         self.linkText.bind("<Key>", lambda e: "break")
+        # self.linkText.config(state=tk.DISABLED)
 
-        seperator = tk.Frame(self.mainWin, name="sep1", height=35, border=2, pady=5)
+        # Create seperator panel
+        seperator: tk.Frame = tk.Frame(
+            self.mainWin, name="sep1", height=35, border=2, pady=5
+        )
         seperator.pack(side=tk.TOP, fill=tk.BOTH, expand=False)
 
-        statusPanel = tk.Frame(
+        # Create status panel
+        statusPanel: tk.Frame = tk.Frame(
             self.mainWin, name="status", border=2, relief="sunken", pady=5, bg="white"
         )
         statusPanel.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        self.statusText = sctx.ScrolledText(statusPanel, height=25)
+        self.statusText: sctx.ScrolledText = sctx.ScrolledText(statusPanel, height=25)
         self.statusText.pack(expand=1)
         self.statusText.bind("<Key>", lambda e: "break")
 
-        # self.linkText.config(state=tk.DISABLED)
-
-        # buttons
-        addButton = tk.Button(
+        # Create add obj button for the linker
+        addButton: tk.Button = tk.Button(
             buttonBar, text="Add\n OBJ File", command=self.addObjFile
         )  # , height=2)
         addButton.pack(side=tk.LEFT)
-        remButton = tk.Button(
+
+        # Create remove obj button for the linker
+        remButton: tk.Button = tk.Button(
             buttonBar, text="Remove\n OBJ File", command=self.remObjFile
         )  # , height=2)
         remButton.pack(side=tk.LEFT)
-        linkButton = tk.Button(
+
+        # Create link symbol button for the linker
+        linkSymbolButton: tk.Button = tk.Button(
             buttonBar,
             text="Link\n Include Symbols",
             command=lambda: self.linkFiles(sym=sym),
         )  # , height=2)
-        linkButton.pack(side=tk.LEFT)
-        linkButton = tk.Button(
+        linkSymbolButton.pack(side=tk.LEFT)
+
+        # Create link logisim button for the linker
+        linkLogisimButton: tk.Button = tk.Button(
             buttonBar, text="Link\n Logisim Image", command=self.linkFiles
         )  # , height=2)
-        linkButton.pack(side=tk.LEFT)
-        quitButton = tk.Button(
+        linkLogisimButton.pack(side=tk.LEFT)
+
+        # Create quit button for the linker
+        quitButton: tk.Button = tk.Button(
             buttonBar, text="Quit\n Linker", command=self.closeCocol
         )  # , height=2)
         quitButton.pack(side=tk.LEFT)
 
-    def addObjFile(self, event=None):
+    def addObjFile(self, event=None) -> None:  # Event is never used here
         global objfiles
         # print("add file")
         filepath = None
@@ -124,7 +139,7 @@ class CocoLink(tk.Tk):
             filepath = filedialog.askopenfilename(
                 filetypes=(("CDM8 Object File", "*.obj"), ("All files", "*.*"))
             )
-        except:
+        except:  # This should catch the actual exception raised
             pass
         self.mainWin.lift()
         if filepath:
@@ -135,15 +150,17 @@ class CocoLink(tk.Tk):
                 # print(filepath)
                 self.linkText.insert(tk.END, filepath + "\n")
 
-    def remObjFile(self, event=None):
+    def remObjFile(self, event=None) -> None:  # Event is never used here
         print("rem file")
         linno = int(float(self.linkText.index("insert linestart")))
-        # print( linno)
+        # print(linno)
         if linno <= len(objfiles):
             del objfiles[linno - 1]
             self.linkText.delete("insert linestart", "insert lineend +1c")
 
-    def linkFiles(self, event=None, sym=False):
+    def linkFiles(
+        self, event=None, sym: bool = False
+    ) -> None:  # Event is never used here
         global args
         args.sym = sym
         args.lst = True
@@ -160,22 +177,22 @@ class CocoLink(tk.Tk):
                 tk.END,
                 "\n\nLINKED OK! Image written to:\n " + objfiles[0][:-4] + ".img\n",
             )
-            self.statusText.insert(tk.END, "\nLINKER REPORT LISTING:\n" + listing)
+            self.statusText.insert(
+                tk.END, "\nLINKER REPORT LISTING:\n" + listing
+            )  # noqa
             self.statusText.see(tk.END)
         # while int(float(self.statusText.index("end linestart ")))>11: # Scroll
         #    #print("link files", int(float(self.statusText.index("end linestart "))))
         #    self.statusText.delete("1.0", "1.0 lineend +1c")# Scroll
 
-    def closeCocol(self):
+    def closeCocol(self) -> None:
         self.mainWin.destroy()
         if __name__ == "__main__":
             self.master.destroy()
 
 
 # Functions
-
-
-def EP(s):
+def EP(s) -> None:  # The type of s is ambiguous here
     global errormsg, term
     # printed output
     sys.stderr.write(s + "\n")
@@ -185,7 +202,7 @@ def EP(s):
         quit(-1)
 
 
-def yieldimg(outfilename="out"):
+def yieldimg(outfilename: str = "out") -> Optional[List[int]]:
     global args, sects
     # print("*",outfilename)#debug
     imgfile = open(outfilename + ".img", "w")
@@ -217,7 +234,7 @@ def yieldimg(outfilename="out"):
     return IMG
 
 
-def deploy(name, addr):
+def deploy(name: str, addr):  # The type of addr is ambiguous here
     global sects
     data = sects[name]["data"]
     rel = sects[name]["rel"]
@@ -240,14 +257,18 @@ def deploy(name, addr):
 
 
 def link(
-    objectfiles=[], ideobjtext=None, filename="linkout", termp=False, fileout=True
-):
+    objectfiles: list = [],
+    ideobjtext=None,
+    filename: str = "linkout",
+    termp: bool = False,
+    fileout=True,  # Fileout is never used here and the type of ideobjtext is ambiguous
+):  # objectfiles shouldn't be mutable, instead the list should be passed (default=None)
     global IMG, taken, sects, xtrns, args, errormsg, term, args
     IMG = [0] * 256
     taken = []
     sects = {}
     xtrns = {}
-    objfiles = []
+    objfiles = []  # objfiles is never used here and it doesn't use the global variant
     errormsg = ""
     term = termp
     listing = None
@@ -276,7 +297,7 @@ def link(
     else:
         try:
             objfilename = listofobj[0]
-        except IndexError as e:
+        except IndexError:
             return "Error: Nothing to compile!", None, None
 
     # , args.sym, objtext)
@@ -331,13 +352,13 @@ def link(
                     clash = False
                 if clash:
                     EP(
-                        "ERROR: absolute section in file '" + f + ".obj' "
-                        "("
+                        "ERROR: absolute section in file '"
+                        + f
+                        + ".obj' ("
                         + format(a, "02x")
                         + ":"
                         + format(c, "02x")
-                        + ") overlaps with "
-                        "("
+                        + ") overlaps with ("
                         + format(addr, "02x")
                         + ":"
                         + format(cnt, "02x")
@@ -417,21 +438,21 @@ def link(
                     line = line[1:]
             continue
 
-    ###### Now start working!
+    # Now start working!
     # check if only asects are present
     if sects == {} and term:
         try:
             yieldimg(objfilename)
-        except:
+        except:  # The actual exception should be used here
             return
             # quit(0)
 
     # Compute free memory segments
     low = 0
     free = []
-    if taken != []:
+    if taken:
         taken = sorted(taken, key=lambda x: x[0])
-        f0 = ""
+        f0 = ""  # f0 is never used here
         for t in taken:
             (start, length, f) = t
 
@@ -461,7 +482,8 @@ def link(
             free += [(lowbound, start + length - lowbound)]
 
     # for each sect build a list of entries and another one of exts
-    # for each sect build a list of sects it refers to by sharing an ext/entry. Call it a binary relation ref
+    # for each sect build a list of sects it refers to by sharing an ext/entry. Call it
+    # a binary relation ref
     # compute the relation ref^t and find which sections are related to "MAIN" by ref^t
     # discard the rest of the sections
     entab = {}
@@ -560,7 +582,7 @@ def link(
     if term:  # if fileout == True:
         try:
             IMG = yieldimg(objfilename)
-        except:
+        except:  # The actual exception should be used here
             print("Warning: Image File ", objfilename, "not saved")
             pass
 

@@ -21,7 +21,7 @@ from enum import Enum, auto
 from tkinter import filedialog
 from tkinter import scrolledtext as sctx
 from tkinter import ttk
-from typing import IO, Any, Dict, List, Optional, Tuple, Union
+from typing import IO, Dict, List, Optional, Tuple, Union
 
 ASM_VER = "2.7"
 
