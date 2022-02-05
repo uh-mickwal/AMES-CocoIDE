@@ -131,7 +131,7 @@ class CocoLink(tk.Tk):
         )  # , height=2)
         quitButton.pack(side=tk.LEFT)
 
-    def addObjFile(self, event=None) -> None:  # Event is never used here
+    def addObjFile(self, event=None) -> None:
         global objfiles
         # print("add file")
         filepath = None
@@ -139,7 +139,7 @@ class CocoLink(tk.Tk):
             filepath = filedialog.askopenfilename(
                 filetypes=(("CDM8 Object File", "*.obj"), ("All files", "*.*"))
             )
-        except:  # This should catch the actual exception raised
+        except:  # noqa
             pass
         self.mainWin.lift()
         if filepath:
@@ -192,7 +192,7 @@ class CocoLink(tk.Tk):
 
 
 # Functions
-def EP(s) -> None:  # The type of s is ambiguous here
+def EP(s: str) -> None:
     global errormsg, term
     # printed output
     sys.stderr.write(s + "\n")
@@ -234,7 +234,7 @@ def yieldimg(outfilename: str = "out") -> Optional[List[int]]:
     return IMG
 
 
-def deploy(name: str, addr):  # The type of addr is ambiguous here
+def deploy(name: str, addr: int):
     global sects
     data = sects[name]["data"]
     rel = sects[name]["rel"]
@@ -258,17 +258,16 @@ def deploy(name: str, addr):  # The type of addr is ambiguous here
 
 def link(
     objectfiles: list = [],
-    ideobjtext=None,
+    ideobjtext: str = None,
     filename: str = "linkout",
     termp: bool = False,
-    fileout=True,  # Fileout is never used here and the type of ideobjtext is ambiguous
+    fileout=True,
 ):  # objectfiles shouldn't be mutable, instead the list should be passed (default=None)
     global IMG, taken, sects, xtrns, args, errormsg, term, args
     IMG = [0] * 256
     taken = []
     sects = {}
     xtrns = {}
-    objfiles = []  # objfiles is never used here and it doesn't use the global variant
     errormsg = ""
     term = termp
     listing = None
@@ -294,11 +293,10 @@ def link(
         objtxtlist = ideobjtext.split("\n")
         for line in objtxtlist:
             objtext += [(line, filename)]
+    elif listofobj:
+        objfilename = listofobj[0]
     else:
-        try:
-            objfilename = listofobj[0]
-        except IndexError:
-            return "Error: Nothing to compile!", None, None
+        return "Error: Nothing to compile!", None, None
 
     # , args.sym, objtext)
     # print("1 ",objtext)
@@ -352,19 +350,10 @@ def link(
                     clash = False
                 if clash:
                     EP(
-                        "ERROR: absolute section in file '"
-                        + f
-                        + ".obj' ("
-                        + format(a, "02x")
-                        + ":"
-                        + format(c, "02x")
-                        + ") overlaps with ("
-                        + format(addr, "02x")
-                        + ":"
-                        + format(cnt, "02x")
-                        + ") in file '"
-                        + filename
-                        + ".obj'"
+                        "ERROR: absolute section in file"
+                        f" '{f}.obj'({format(a, '02x')}:{format(c, '02x')}) overlaps"
+                        f" with ({format(addr, '02x')}:{format(cnt, '02x')}) in file"
+                        f" '{filename}'.obj'"
                     )
                     return errormsg, listing, IMG
             taken += [(addr, cnt, filename)]
