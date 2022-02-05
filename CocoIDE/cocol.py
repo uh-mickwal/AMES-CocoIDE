@@ -10,32 +10,14 @@
 # Python 2 and 3 compatibility
 from __future__ import absolute_import, division, print_function
 
-try:
-    input = raw_input  # Python 3 style input()
-except NameError:
-    pass  # Running on Python 3
-
 import argparse
 import os
 import sys
 from typing import List, Optional
 
-try:
-    # Python 3 tk
-    import tkinter as tk
-    import tkinter.font as font
-    from tkinter import filedialog, messagebox
-    from tkinter import scrolledtext as sctx
-    from tkinter import ttk
-except ImportError:
-    # Python 2 tk (runs but not exhaustively tested!)
-    # Ames lib (sendfile.py) not python 2 compatible (urllib)
-    import ScrolledText as sctx
-    import tkFileDialog as filedialog
-    import tkFont as font
-    import Tkinter as tk
-    import tkMessageBox as messagebox
-    import ttk
+import tkinter as tk
+from tkinter import filedialog
+from tkinter import scrolledtext as sctx
 
 
 TITLE = "Cocol Linker GUI V2.0"
@@ -53,8 +35,8 @@ term = False
 class CocoLink(tk.Tk):
     def __init__(self, master=None, name="cocol", exitroot=False, sym=True) -> None:
         super().__init__()
-        self.master: tk.Misc = master
-        self.mainWin: tk.Toplevel = tk.Toplevel(master=master)
+        self.master = master
+        self.mainWin = tk.Toplevel(master=master)
         self.mainWin.lift()
         # self.mainWin.update()
         # self.mainWin.wm_attributes("-topmost", False)
@@ -69,50 +51,50 @@ class CocoLink(tk.Tk):
         self.mainWin.focus()
 
         # Create buttonbar panel
-        buttonBar: tk.Frame = tk.Frame(
+        buttonBar = tk.Frame(
             self.mainWin, name="buttonbar", height=35, width=400, border=2, pady=5
         )
         buttonBar.pack(side=tk.TOP, fill=tk.X, expand=False)
 
         # Create link panel
-        linkPanel: tk.Frame = tk.Frame(
+        linkPanel = tk.Frame(
             self.mainWin, name="link", border=2, relief="sunken", pady=5
         )
         linkPanel.pack(side=tk.TOP, fill=tk.BOTH, expand=1)
-        self.linkText: sctx.ScrolledText = sctx.ScrolledText(linkPanel, height=10)
+        self.linkText = sctx.ScrolledText(linkPanel, height=10)
         self.linkText.pack(expand=1)
         self.linkText.bind("<Key>", lambda e: "break")
         # self.linkText.config(state=tk.DISABLED)
 
         # Create seperator panel
-        seperator: tk.Frame = tk.Frame(
+        seperator = tk.Frame(
             self.mainWin, name="sep1", height=35, border=2, pady=5
         )
         seperator.pack(side=tk.TOP, fill=tk.BOTH, expand=False)
 
         # Create status panel
-        statusPanel: tk.Frame = tk.Frame(
+        statusPanel = tk.Frame(
             self.mainWin, name="status", border=2, relief="sunken", pady=5, bg="white"
         )
         statusPanel.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        self.statusText: sctx.ScrolledText = sctx.ScrolledText(statusPanel, height=25)
+        self.statusText = sctx.ScrolledText(statusPanel, height=25)
         self.statusText.pack(expand=1)
         self.statusText.bind("<Key>", lambda e: "break")
 
         # Create add obj button for the linker
-        addButton: tk.Button = tk.Button(
+        addButton = tk.Button(
             buttonBar, text="Add\n OBJ File", command=self.addObjFile
         )  # , height=2)
         addButton.pack(side=tk.LEFT)
 
         # Create remove obj button for the linker
-        remButton: tk.Button = tk.Button(
+        remButton = tk.Button(
             buttonBar, text="Remove\n OBJ File", command=self.remObjFile
         )  # , height=2)
         remButton.pack(side=tk.LEFT)
 
         # Create link symbol button for the linker
-        linkSymbolButton: tk.Button = tk.Button(
+        linkSymbolButton = tk.Button(
             buttonBar,
             text="Link\n Include Symbols",
             command=lambda: self.linkFiles(sym=sym),
@@ -120,13 +102,13 @@ class CocoLink(tk.Tk):
         linkSymbolButton.pack(side=tk.LEFT)
 
         # Create link logisim button for the linker
-        linkLogisimButton: tk.Button = tk.Button(
+        linkLogisimButton = tk.Button(
             buttonBar, text="Link\n Logisim Image", command=self.linkFiles
         )  # , height=2)
         linkLogisimButton.pack(side=tk.LEFT)
 
         # Create quit button for the linker
-        quitButton: tk.Button = tk.Button(
+        quitButton = tk.Button(
             buttonBar, text="Quit\n Linker", command=self.closeCocol
         )  # , height=2)
         quitButton.pack(side=tk.LEFT)
@@ -178,7 +160,7 @@ class CocoLink(tk.Tk):
                 "\n\nLINKED OK! Image written to:\n " + objfiles[0][:-4] + ".img\n",
             )
             self.statusText.insert(
-                tk.END, "\nLINKER REPORT LISTING:\n" + listing
+                tk.END, "\nLINKER REPORT LISTING:\n" + listing # noqa
             )  # noqa
             self.statusText.see(tk.END)
         # while int(float(self.statusText.index("end linestart ")))>11: # Scroll
@@ -262,7 +244,7 @@ def link(
     filename: str = "linkout",
     termp: bool = False,
     fileout=True,
-):  # objectfiles shouldn't be mutable, instead the list should be passed (default=None)
+):
     global IMG, taken, sects, xtrns, args, errormsg, term, args
     IMG = [0] * 256
     taken = []
