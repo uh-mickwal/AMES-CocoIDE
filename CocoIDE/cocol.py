@@ -85,9 +85,7 @@ class CocoLink(tk.Tk):
         # self.linkText.config(state=tk.DISABLED)
 
         # Create seperator panel
-        seperator = tk.Frame(
-            self.mainWin, name="sep1", height=35, border=2, pady=5
-        )
+        seperator = tk.Frame(self.mainWin, name="sep1", height=35, border=2, pady=5)
         seperator.pack(side=tk.TOP, fill=tk.BOTH, expand=False)
 
         # Create status panel
@@ -178,7 +176,7 @@ class CocoLink(tk.Tk):
                 "\n\nLINKED OK! Image written to:\n " + objfiles[0][:-4] + ".img\n",
             )
             self.statusText.insert(
-                tk.END, "\nLINKER REPORT LISTING:\n" + listing # noqa
+                tk.END, "\nLINKER REPORT LISTING:\n" + listing  # noqa
             )  # noqa
             self.statusText.see(tk.END)
         # while int(float(self.statusText.index("end linestart ")))>11: # Scroll
