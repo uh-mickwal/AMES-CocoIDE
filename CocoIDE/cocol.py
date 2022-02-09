@@ -10,14 +10,32 @@
 # Python 2 and 3 compatibility
 from __future__ import absolute_import, division, print_function
 
+try:
+    input = raw_input  # Python 3 style input()
+except NameError:
+    pass  # Running on Python 3
+
 import argparse
 import os
 import sys
 from typing import List, Optional
 
-import tkinter as tk
-from tkinter import filedialog
-from tkinter import scrolledtext as sctx
+try:
+    # Python 3 tk
+    import tkinter as tk
+    import tkinter.font as font
+    from tkinter import filedialog, messagebox
+    from tkinter import scrolledtext as sctx
+    from tkinter import ttk
+except ImportError:
+    # Python 2 tk (runs but not exhaustively tested!)
+    # Ames lib (sendfile.py) not python 2 compatible (urllib)
+    import ScrolledText as sctx
+    import tkFileDialog as filedialog
+    import tkFont as font
+    import Tkinter as tk
+    import tkMessageBox as messagebox
+    import ttk
 
 
 TITLE = "Cocol Linker GUI V2.0"
