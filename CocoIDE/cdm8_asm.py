@@ -7,14 +7,13 @@
 language = "CDM8 Assembly Language"
 fileext = ".asm"
 version = "V1.1"
-screenScaleMode = False  # = "Presenter mode" scales main window to fill
-# screen, also good for smaller screens.
-# False = "Lab PC mode" smaller fixed window size.
-# Note, -p option overides this setting to scale display.
+screenScaleMode = False  # True = "Presenter mode" scales main window to fill screen.
+# False = "Lab PC mode" smaller fixed window size. Note, -p option overides this setting
+# to scale display.
 
 
 helpFile = "CocoIDE-SoftwareManual.pdf"
-basefont = None  # "monospace 6" # None = system default font. Try "courier 10 bold", "monospace 12", "arial 11" etc.
+basefont = None  # "monospace 6" None = system default font. Try "courier 10 bold", "monospace 12", "arial 11" etc.
 watchtrigs = ["dc", "ds"]
 labelspec = [":", ">"]
 entrySpec = "_"  # If label starts with this, add to RunFrom menu
@@ -98,7 +97,7 @@ highlights = {
         "ldsa",
         "ioi",
         "rti",
-    ],  # "osix"], # osix removed, only needed for paged mem
+    ],  # "osix"], osix removed, only needed for paged mem
     "green": ["asect", "rsect", "end", "dc", "ds", "ext", "tplate", "set", "page"],
     "purple": [
         "run",

@@ -6,8 +6,8 @@
 
 ####### CDM8 Emulator
 # V4.00 Update for new stack instructions (Alex)
-# V4.01 Changed to show memory changes back to CocoIDE/CocoEmu for new
-#       pushall instruction (Mick)
+# V4.01 Changed to show memory changes back to CocoIDE/CocoEmu for new pushall
+# instruction (Mick)
 # V4.2  Implement Harvard Architecture - two mem banks, + support for ldc)#
 
 # Aug 2018, M L Walters
@@ -20,18 +20,18 @@
 
 
 # Python3 and 2
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import, division, print_function, annotations
 
 import argparse
 import random
 
-random.seed()
-import time
 import sys
+
+random.seed()
 
 
 class CDM8Emu:
-    def __init__(self, memory=None, arch="vn", pages=8, parent=None):
+    def __init__(self, memory=None, arch="vn", pages=8, parent=None) -> None:
         self.parent = parent
         self.VN = "vn"
         self.HV = "hv"
